@@ -4,11 +4,13 @@ import { Modal } from '../Popover';
 import { WIDGETS, widgetMeta, type HomeCtx } from './meta';
 import { WidgetBody } from './widgets';
 import './home.css';
+import './details.css';
 
 type Props = {
   pages: PageMeta[];
   dataVersion: number;
   openPage: (id: string) => void;
+  openWidget: (id: string) => void;
   onError: (msg: string) => void;
 };
 
@@ -49,7 +51,7 @@ function greeting() {
   return '오늘 하루도 수고했어요 🌙';
 }
 
-export function Home({ pages, dataVersion, openPage, onError }: Props) {
+export function Home({ pages, dataVersion, openPage, openWidget, onError }: Props) {
   const [widgets, setWidgets] = useState<Widget[] | null>(null);
   const [agenda, setAgenda] = useState<AgendaDb[]>([]);
   const [editing, setEditing] = useState(false);
@@ -127,38 +129,7 @@ export function Home({ pages, dataVersion, openPage, onError }: Props) {
     patchWidget(dragId, { position }, true);
   };
 
-  const ctx: HomeCtx = {
-    pages,
-    agenda,
-    openPage,
-    onError,
-    updateRow: (dbId, rowId, props) => {
-      setAgenda((as) => as.map((d) => (d.id !== dbId ? d : {
-        ...d,
-        rows: d.rows.map((r) => {
-          if (r.id !== rowId) return r;
-          const next = { ...r.props };
-          for (const [k, v] of Object.entries(props)) {
-            if (v === null || v === '') delete next[k];
-            else next[k] = v;
-          }
-          return { ...r, props: next };
-        }),
-      })));
-      api.updatePage(rowId, { props }).catch((e) => {
-        onError(e.message);
-        loadAgenda();
-      });
-    },
-    addRow: async (dbId, title, props) => {
-      try {
-        await api.createRow(dbId, { title, props });
-        loadAgenda();
-      } catch (e) {
-        onError((e as Error).message);
-      }
-    },
-  };
+  const ctx = useHomeCtx(pages, agenda, setAgenda, loadAgenda, openPage, onError);
 
   const now = new Date();
 
@@ -219,7 +190,8 @@ export function Home({ pages, dataVersion, openPage, onError }: Props) {
                 <header className="widget-head">
                   {editing && <span className="widget-grip" title="끌어서 옮기기">⠿</span>}
                   <span className="widget-icon">{meta.icon}</span>
-                  <span className="widget-title">{meta.label}</span>
+                  <button className="widget-title" onClick={() => openWidget(w.id)} title="전체 보기">{meta.label}</button>
+                  <button className="icon-btn widget-open" onClick={() => openWidget(w.id)} title="전체 보기">↗</button>
                 </header>
                 {editing && (
                   <div className="widget-edit">
@@ -271,4 +243,48 @@ export function Home({ pages, dataVersion, openPage, onError }: Props) {
       )}
     </div>
   );
+}
+
+
+export function useHomeCtx(
+  pages: PageMeta[],
+  agenda: AgendaDb[],
+  setAgenda: React.Dispatch<React.SetStateAction<AgendaDb[]>>,
+  loadAgenda: () => void,
+  openPage: (id: string) => void,
+  onError: (msg: string) => void,
+): HomeCtx {
+  return {
+    pages,
+    agenda,
+    openPage,
+    onError,
+    updateRow: (dbId, rowId, props) => {
+      setAgenda((as) => as.map((d) => (d.id !== dbId ? d : {
+        ...d,
+        rows: d.rows.map((r) => {
+          if (r.id !== rowId) return r;
+          const next = { ...r.props };
+          for (const [k, v] of Object.entries(props)) {
+            if (v === null || v === '') delete next[k];
+            else next[k] = v;
+          }
+          return { ...r, props: next };
+        }),
+      })));
+      api.updatePage(rowId, { props }).catch((e) => {
+        onError(e.message);
+        loadAgenda();
+      });
+    },
+    addRow: async (dbId, title, props) => {
+      try {
+        await api.createRow(dbId, { title, props });
+        loadAgenda();
+      } catch (e) {
+        onError((e as Error).message);
+      }
+    },
+  };
+
 }

@@ -1,7 +1,7 @@
 {
   "name": "pastelflow",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n server,web \"node --disable-warning=ExperimentalWarning --watch server/index.js\" \"vite\"",

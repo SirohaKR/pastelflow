@@ -6,11 +6,17 @@ import { Sidebar } from './components/Sidebar';
 import { PageView, type SaveState } from './components/PageView';
 import { Login, SearchDialog, SettingsDialog, TrashDialog } from './components/Dialogs';
 import { Home } from './components/home/Home';
+import { WidgetPage } from './components/home/WidgetPage';
 
 const isNarrow = () => window.matchMedia('(max-width: 760px)').matches;
 
 function idFromPath() {
   const m = location.pathname.match(/^\/p\/([\w-]+)/);
+  return m ? m[1] : null;
+}
+
+function widgetFromPath() {
+  const m = location.pathname.match(/^\/w\/([\w-]+)/);
   return m ? m[1] : null;
 }
 
@@ -28,6 +34,8 @@ export default function App() {
   const [dark, setDark] = useState(() => applyTheme(cachedSettings()));
   const [pages, setPages] = useState<PageMeta[] | null>(null);
   const [currentId, setCurrentId] = useState<string | null>(idFromPath);
+  // 홈 위젯 상세 페이지 (/w/위젯id)
+  const [widgetId, setWidgetId] = useState<string | null>(widgetFromPath);
   const [page, setPage] = useState<Page | null>(null);
   const [freshId, setFreshId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(loadExpanded);
@@ -87,13 +95,25 @@ export default function App() {
   // ── 주소와 현재 페이지 ──
   const open = useCallback((id: string | null, replace = false) => {
     setCurrentId(id);
+    setWidgetId(null);
     const url = id ? `/p/${id}` : '/';
     if (location.pathname !== url) history[replace ? 'replaceState' : 'pushState'](null, '', url);
     if (isNarrow()) setSidebarOpen(false);
   }, []);
 
+  const openWidget = useCallback((id: string) => {
+    setCurrentId(null);
+    setWidgetId(id);
+    const url = `/w/${id}`;
+    if (location.pathname !== url) history.pushState(null, '', url);
+    if (isNarrow()) setSidebarOpen(false);
+  }, []);
+
   useEffect(() => {
-    const onPop = () => setCurrentId(idFromPath());
+    const onPop = () => {
+      setCurrentId(idFromPath());
+      setWidgetId(widgetFromPath());
+    };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
@@ -237,7 +257,9 @@ export default function App() {
             <button className="icon-btn" title="사이드바 열기" onClick={() => setSidebarOpen(true)}>☰</button>
           )}
           <nav className="crumbs">
-            {!currentId && <span className="crumb">🏠 홈</span>}
+            {!currentId && (widgetId
+              ? <button className="crumb" onClick={() => open(null)}>🏠 홈</button>
+              : <span className="crumb">🏠 홈</span>)}
             {crumbs.map((c, i) => (
               <span key={c.id} style={{ display: 'contents' }}>
                 {i > 0 && <span>/</span>}
@@ -275,7 +297,11 @@ export default function App() {
               onPagesChanged={reloadPages}
             />
           ) : !currentId ? (
-            <Home pages={pages} dataVersion={dataVersion} openPage={open} onError={showError} />
+            widgetId ? (
+              <WidgetPage key={widgetId} id={widgetId} pages={pages} dataVersion={dataVersion} openPage={open} onBack={() => open(null)} onError={showError} />
+            ) : (
+              <Home pages={pages} dataVersion={dataVersion} openPage={open} openWidget={openWidget} onError={showError} />
+            )
           ) : null}
         </div>
       </main>

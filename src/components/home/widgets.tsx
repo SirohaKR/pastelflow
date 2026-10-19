@@ -4,6 +4,10 @@ import { addDays, diffDays, formatDate, parseKey, toKey, todayKey } from '../../
 import { displayTitle, dotColor, timeAgo } from '../../tree';
 import { flattenAgenda, newItemProps, onDay, type AgendaItem } from './agenda';
 import { uid, type HomeCtx, type WidgetProps } from './meta';
+import {
+  catsOf, ddayLabel, ddayTarget, habitColor, normalizeUrl, sortDdays, streak, tagAt, trimLog, won,
+  type BudgetConfig, type DdayConfig, type Goal, type GoalsConfig, type Habit, type HabitsConfig, type LinksConfig, type MemoConfig,
+} from './model';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
@@ -185,25 +189,12 @@ function CalendarWidget({ ctx }: WidgetProps<Record<string, never>>) {
 }
 
 // ── D-day ─────────────────────────────────────────────────
-type Dday = { id: string; name: string; date: string; emoji: string };
-type DdayConfig = { items?: Dday[] };
-
-function ddayLabel(date: string) {
-  const n = diffDays(todayKey(), date);
-  if (n === 0) return 'D-DAY';
-  return n > 0 ? `D-${n}` : `D+${-n}`;
-}
-
 function DdayWidget({ config, setConfig }: WidgetProps<DdayConfig>) {
   const items = config.items ?? [];
   const [name, setName] = useState('');
   const [date, setDate] = useState('');
   const today = todayKey();
-  const sorted = [...items].sort((a, b) => {
-    const pa = a.date < today ? 1 : 0;
-    const pb = b.date < today ? 1 : 0;
-    return pa - pb || (pa ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date));
-  });
+  const sorted = sortDdays(items);
 
   const add = (e: FormEvent) => {
     e.preventDefault();
@@ -217,11 +208,11 @@ function DdayWidget({ config, setConfig }: WidgetProps<DdayConfig>) {
     <div className="w-dday">
       {sorted.length === 0 && <Empty>시험, 생일, 여행처럼 기다리는 날을 넣어 보세요.</Empty>}
       {sorted.map((d, i) => (
-        <div key={d.id} className={`w-dday-item ${d.date < today ? 'past' : ''}`}>
-          <span className={`w-dday-badge tag-p${(i % 6) + 1}`}>{ddayLabel(d.date)}</span>
+        <div key={d.id} className={`w-dday-item ${ddayTarget(d) < today ? 'past' : ''}`}>
+          <span className={`w-dday-badge tag-${tagAt(i)}`}>{ddayLabel(d)}</span>
           <span className="w-dday-text">
             <b>{d.name}</b>
-            <small>{formatDate(d.date)}</small>
+            <small>{formatDate(ddayTarget(d))}{d.yearly ? ' · 매년' : ''}</small>
           </span>
           <button className="w-x" title="지우기" onClick={() => setConfig({ ...config, items: items.filter((x) => x.id !== d.id) })}>✕</button>
         </div>
@@ -236,20 +227,6 @@ function DdayWidget({ config, setConfig }: WidgetProps<DdayConfig>) {
 }
 
 // ── 습관 체크 ─────────────────────────────────────────────
-type Habit = { id: string; name: string };
-type HabitsConfig = { habits?: Habit[]; log?: Record<string, string[]> };
-
-function streak(days: Set<string>) {
-  let key = todayKey();
-  if (!days.has(key)) key = addDays(key, -1);
-  let n = 0;
-  while (days.has(key) && n < 3650) {
-    n += 1;
-    key = addDays(key, -1);
-  }
-  return n;
-}
-
 function HabitsWidget({ config, setConfig }: WidgetProps<HabitsConfig>) {
   const habits = config.habits ?? [];
   const log = config.log ?? {};
@@ -261,9 +238,7 @@ function HabitsWidget({ config, setConfig }: WidgetProps<HabitsConfig>) {
     const set = new Set(log[hid] ?? []);
     if (set.has(key)) set.delete(key);
     else set.add(key);
-    // 오래된 기록은 1년치만 남긴다
-    const cutoff = addDays(today, -366);
-    setConfig({ ...config, log: { ...log, [hid]: [...set].filter((k) => k >= cutoff).sort() } });
+    setConfig({ ...config, log: { ...log, [hid]: trimLog(set) } });
   };
 
   const add = (e: FormEvent) => {
@@ -308,7 +283,7 @@ function HabitsWidget({ config, setConfig }: WidgetProps<HabitsConfig>) {
                   {week.map((k) => (
                     <td key={k}>
                       <button
-                        className={`w-check tag-p${(idx % 6) + 1} ${days.has(k) ? 'on' : ''}`}
+                        className={`w-check tag-${habitColor(h, idx)} ${days.has(k) ? 'on' : ''}`}
                         aria-label={`${h.name} ${formatDate(k)}`}
                         onClick={() => toggle(h.id, k)}
                       >
@@ -331,8 +306,6 @@ function HabitsWidget({ config, setConfig }: WidgetProps<HabitsConfig>) {
 }
 
 // ── 목표 진행률 ─────────────────────────────────────────────
-type Goal = { id: string; name: string; current: number; target: number; unit: string };
-type GoalsConfig = { goals?: Goal[] };
 
 function GoalsWidget({ config, setConfig }: WidgetProps<GoalsConfig>) {
   const goals = config.goals ?? [];
@@ -375,7 +348,7 @@ function GoalsWidget({ config, setConfig }: WidgetProps<GoalsConfig>) {
               </span>
               <button className="w-x" title="지우기" onClick={() => setConfig({ ...config, goals: goals.filter((x) => x.id !== g.id) })}>✕</button>
             </div>
-            <div className={`w-bar tag-p${(i % 6) + 1}`}><span style={{ width: `${pct}%` }} /></div>
+            <div className={`w-bar tag-${tagAt(i)}`}><span style={{ width: `${pct}%` }} /></div>
             <small className="w-goal-pct">{pct >= 100 ? '🎉 달성!' : `${pct}%`}</small>
           </div>
         );
@@ -391,7 +364,7 @@ function GoalsWidget({ config, setConfig }: WidgetProps<GoalsConfig>) {
 }
 
 // ── 빠른 메모 ─────────────────────────────────────────────
-function MemoWidget({ config, setConfig }: WidgetProps<{ text?: string }>) {
+function MemoWidget({ config, setConfig }: WidgetProps<MemoConfig>) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const text = config.text ?? '';
   useLayoutEffect(() => {
@@ -412,18 +385,13 @@ function MemoWidget({ config, setConfig }: WidgetProps<{ text?: string }>) {
 }
 
 // ── 가계부 ─────────────────────────────────────────────────
-type Entry = { id: string; date: string; kind: 'out' | 'in'; amount: number; cat: string; memo: string };
-type BudgetConfig = { entries?: Entry[]; budget?: number };
-const CATS_OUT = ['식비', '카페', '교통', '쇼핑', '생활', '취미', '기타'];
-const CATS_IN = ['월급', '용돈', '부수입', '기타'];
-const won = (n: number) => `${n.toLocaleString('ko-KR')}원`;
 
 function BudgetWidget({ config, setConfig }: WidgetProps<BudgetConfig>) {
   const entries = config.entries ?? [];
   const [month, setMonth] = useState(() => todayKey().slice(0, 7));
   const [kind, setKind] = useState<'out' | 'in'>('out');
   const [amount, setAmount] = useState('');
-  const [cat, setCat] = useState(CATS_OUT[0]);
+  const [cat, setCat] = useState(catsOf(config, 'out')[0]);
   const [memo, setMemo] = useState('');
   const [date, setDate] = useState(todayKey());
 
@@ -483,7 +451,7 @@ function BudgetWidget({ config, setConfig }: WidgetProps<BudgetConfig>) {
           {cats.slice(0, 6).map(([c, v], i) => (
             <div key={c} className="w-cat">
               <span className="w-cat-name">{c}</span>
-              <div className={`w-bar thin tag-p${(i % 6) + 1}`}><span style={{ width: `${Math.round((v / spent) * 100)}%` }} /></div>
+              <div className={`w-bar thin tag-${tagAt(i)}`}><span style={{ width: `${Math.round((v / spent) * 100)}%` }} /></div>
               <span className="w-cat-amt">{won(v)}</span>
             </div>
           ))}
@@ -492,12 +460,12 @@ function BudgetWidget({ config, setConfig }: WidgetProps<BudgetConfig>) {
 
       <form className="w-add budget" onSubmit={add}>
         <div className="segmented small">
-          <button type="button" className={kind === 'out' ? 'on' : ''} onClick={() => { setKind('out'); setCat(CATS_OUT[0]); }}>지출</button>
-          <button type="button" className={kind === 'in' ? 'on' : ''} onClick={() => { setKind('in'); setCat(CATS_IN[0]); }}>수입</button>
+          <button type="button" className={kind === 'out' ? 'on' : ''} onClick={() => { setKind('out'); setCat(catsOf(config, 'out')[0]); }}>지출</button>
+          <button type="button" className={kind === 'in' ? 'on' : ''} onClick={() => { setKind('in'); setCat(catsOf(config, 'in')[0]); }}>수입</button>
         </div>
         <input className="field small num" inputMode="numeric" placeholder="금액" value={amount} onChange={(e) => setAmount(e.target.value)} />
         <select className="field small" value={cat} onChange={(e) => setCat(e.target.value)}>
-          {(kind === 'out' ? CATS_OUT : CATS_IN).map((c) => <option key={c}>{c}</option>)}
+          {catsOf(config, kind).map((c) => <option key={c}>{c}</option>)}
         </select>
         <input className="field small" placeholder="메모" value={memo} onChange={(e) => setMemo(e.target.value)} />
         <input className="field small" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
@@ -520,21 +488,6 @@ function BudgetWidget({ config, setConfig }: WidgetProps<BudgetConfig>) {
 }
 
 // ── 링크 모음 ─────────────────────────────────────────────
-type Link = { id: string; title: string; url: string };
-type LinksConfig = { links?: Link[] };
-
-function normalizeUrl(raw: string) {
-  const v = raw.trim();
-  if (!v) return '';
-  const withProto = /^https?:\/\//i.test(v) ? v : `https://${v}`;
-  try {
-    const u = new URL(withProto);
-    return u.protocol === 'http:' || u.protocol === 'https:' ? u.href : '';
-  } catch {
-    return '';
-  }
-}
-
 function LinksWidget({ config, setConfig }: WidgetProps<LinksConfig>) {
   const links = config.links ?? [];
   const [title, setTitle] = useState('');
@@ -545,7 +498,7 @@ function LinksWidget({ config, setConfig }: WidgetProps<LinksConfig>) {
     const href = normalizeUrl(url);
     if (!href) return;
     const name = title.trim() || new URL(href).hostname.replace(/^www\./, '');
-    setConfig({ ...config, links: [...links, { id: uid(), title: name, url: href }] });
+    setConfig({ ...config, links: [...links, { id: uid(), title: name, url: href, createdAt: Date.now() }] });
     setTitle('');
     setUrl('');
   };
@@ -557,7 +510,7 @@ function LinksWidget({ config, setConfig }: WidgetProps<LinksConfig>) {
         {links.map((l, i) => (
           <div key={l.id} className="w-link-tile">
             <a href={l.url} target="_blank" rel="noopener noreferrer" title={l.url}>
-              <span className={`w-link-badge tag-p${(i % 6) + 1}`}>{[...l.title][0]?.toUpperCase()}</span>
+              <span className={`w-link-badge tag-${tagAt(i)}`}>{[...l.title][0]?.toUpperCase()}</span>
               <span className="w-link-name">{l.title}</span>
             </a>
             <button className="w-x" title="지우기" onClick={() => setConfig({ ...config, links: links.filter((x) => x.id !== l.id) })}>✕</button>
