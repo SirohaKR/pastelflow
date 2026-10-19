@@ -58,10 +58,10 @@
    cp .env.example .env
    mkdir -p data
    id                      # uid, gid 확인
-   sudo chown -R 1041:100 data   # 위에서 확인한 숫자로 바꾸세요
    ```
 
-   `.env` 에서 `APP_PASSWORD`, `PUID`, `PGID` 를 채워요.
+   `.env` 에서 `APP_PASSWORD` 를 정하고, `PUID`, `PGID` 를 위에서 확인한 숫자로 맞춰요.
+   컨테이너가 켜질 때 `data` 폴더 주인을 이 번호로 알아서 바꾸기 때문에 `chown` 은 따로 안 해도 돼요.
 
 3. 실행해요.
 
@@ -69,7 +69,7 @@
    sudo docker compose up -d --build
    ```
 
-   `http://NAS주소:5210` 으로 접속하면 돼요.
+   `http://NAS주소:5190` 으로 접속하면 돼요. 다른 포트를 쓰려면 `docker-compose.yml` 의 `"5190:5210"` 에서 앞쪽 숫자를 바꾸세요.
 
 ### 업데이트
 
