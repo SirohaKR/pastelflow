@@ -1,0 +1,17 @@
+services:
+  pastelflow:
+    build: .
+    image: pastelflow:latest
+    container_name: pastelflow
+    restart: unless-stopped
+    ports:
+      - "5210:5210"
+    environment:
+      # 비워 두면 로그인 없이 열립니다. 외부에서 접속할 거라면 꼭 정해 주세요.
+      APP_PASSWORD: ${APP_PASSWORD:-}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-20}
+      TZ: Asia/Seoul
+    # 시놀로지에서는 data 폴더의 소유자를 맞춰 주세요 (README 참고)
+    user: "${PUID:-1000}:${PGID:-1000}"
+    volumes:
+      - ./data:/data

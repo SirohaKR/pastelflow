@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f6f3fd" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>파스텔플로우</title>
+    <script>
+      // 첫 화면이 깜빡이지 않도록 마지막 테마를 미리 적용
+      try {
+        var s = JSON.parse(localStorage.getItem('pf-theme') || '{}');
+        var dark = s.mode === 'dark' || (s.mode === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+        document.documentElement.dataset.accent = s.accent || 'lavender';
+      } catch (e) {
+        document.documentElement.dataset.accent = 'lavender';
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
