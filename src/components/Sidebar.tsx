@@ -9,7 +9,7 @@ type Props = {
   expanded: Set<string>;
   onToggle: (id: string, open?: boolean) => void;
   onOpen: (id: string) => void;
-  onCreate: (parentId: string | null) => void;
+  onCreate: (parentId: string | null, kind?: 'page' | 'database') => void;
   onMove: (id: string, target: PageMeta, zone: DropZone) => void;
   onFavorite: (id: string, favorite: boolean) => void;
   onTrash: (id: string) => void;
@@ -39,6 +39,7 @@ export function Sidebar(props: Props) {
           🔍 검색 <kbd>{isMac ? '⌘' : 'Ctrl'} K</kbd>
         </button>
         <button className="side-action" onClick={() => onCreate(null)}>➕ 새 페이지</button>
+        <button className="side-action" onClick={() => onCreate(null, 'database')}>🗃️ 새 데이터베이스</button>
       </div>
 
       <div className="side-scroll">
@@ -85,6 +86,8 @@ function TreeNode(props: NodeProps) {
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const kids = flat ? [] : childrenOf(pages, page.id);
   const open = expanded.has(page.id);
+  // 데이터베이스는 하위 페이지 대신 행을 가진다
+  const isDb = page.kind === 'database';
 
   const canDrop = !flat && dragId && dragId !== page.id && !isInSubtree(pages, dragId, page.id);
 
@@ -93,7 +96,8 @@ function TreeNode(props: NodeProps) {
     e.preventDefault();
     const r = e.currentTarget.getBoundingClientRect();
     const y = (e.clientY - r.top) / r.height;
-    setZone(y < 0.28 ? 'before' : y > 0.72 ? 'after' : 'inside');
+    if (isDb) setZone(y < 0.5 ? 'before' : 'after');
+    else setZone(y < 0.28 ? 'before' : y > 0.72 ? 'after' : 'inside');
   };
 
   const onDrop = (e: DragEvent<HTMLDivElement>) => {
@@ -124,7 +128,7 @@ function TreeNode(props: NodeProps) {
         onDrop={onDrop}
       >
         <button
-          className={`tree-toggle ${open ? 'open' : ''} ${kids.length === 0 || flat ? 'leaf' : ''}`}
+          className={`tree-toggle ${open ? 'open' : ''} ${kids.length === 0 || flat || isDb ? 'leaf' : ''}`}
           onClick={() => props.onToggle(page.id)}
           aria-label={open ? '접기' : '펼치기'}
         >
@@ -133,6 +137,8 @@ function TreeNode(props: NodeProps) {
         <button className="tree-link" onClick={() => props.onOpen(page.id)}>
           {page.icon ? (
             <span className="tree-icon">{page.icon}</span>
+          ) : isDb ? (
+            <span className="tree-icon db-glyph">▦</span>
           ) : (
             <span className="tree-dot" style={{ background: dotColor(page.id) }} />
           )}
@@ -140,7 +146,7 @@ function TreeNode(props: NodeProps) {
         </button>
         <div className="tree-tools">
           <button className="icon-btn" title="더 보기" onClick={(e) => setMenuAnchor(e.currentTarget)}>⋯</button>
-          {!flat && (
+          {!flat && !isDb && (
             <button
               className="icon-btn"
               title="하위 페이지 추가"
@@ -166,15 +172,28 @@ function TreeNode(props: NodeProps) {
             >
               {page.favorite ? '☆ 즐겨찾기 해제' : '⭐ 즐겨찾기에 추가'}
             </button>
-            <button
-              onClick={() => {
-                props.onToggle(page.id, true);
-                props.onCreate(page.id);
-                setMenuAnchor(null);
-              }}
-            >
-              ➕ 하위 페이지 추가
-            </button>
+            {!isDb && (
+              <>
+                <button
+                  onClick={() => {
+                    props.onToggle(page.id, true);
+                    props.onCreate(page.id);
+                    setMenuAnchor(null);
+                  }}
+                >
+                  ➕ 하위 페이지 추가
+                </button>
+                <button
+                  onClick={() => {
+                    props.onToggle(page.id, true);
+                    props.onCreate(page.id, 'database');
+                    setMenuAnchor(null);
+                  }}
+                >
+                  🗃️ 하위 데이터베이스 추가
+                </button>
+              </>
+            )}
             <button
               className="danger"
               onClick={() => {
@@ -189,7 +208,7 @@ function TreeNode(props: NodeProps) {
       )}
 
       {open && kids.map((k) => <TreeNode key={k.id} {...props} page={k} depth={depth + 1} />)}
-      {open && !flat && kids.length === 0 && (
+      {open && !flat && !isDb && kids.length === 0 && (
         <div className="side-empty" style={{ paddingLeft: 30 + depth * 16 }}>하위 페이지 없음</div>
       )}
     </>

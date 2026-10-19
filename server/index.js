@@ -108,7 +108,16 @@ app.use('/uploads', express.static(UPLOAD_DIR, {
 app.get('/api/pages', (_req, res) => res.json(repo.list()));
 
 app.post('/api/pages', (req, res) => {
-  res.status(201).json(repo.create({ parentId: req.body?.parentId || null, title: req.body?.title || '' }));
+  const kind = req.body?.kind === 'database' ? 'database' : 'page';
+  res.status(201).json(repo.create({ parentId: req.body?.parentId || null, kind, title: req.body?.title || '' }));
+});
+
+// 데이터베이스와 그 안의 행 목록
+app.get('/api/databases/:id', (req, res) => res.json(repo.database(req.params.id)));
+
+app.post('/api/databases/:id/rows', (req, res) => {
+  const { title = '', props = {}, position } = req.body || {};
+  res.status(201).json(repo.create({ parentId: req.params.id, kind: 'row', title, props, position }));
 });
 
 app.get('/api/pages/:id', (req, res) => {

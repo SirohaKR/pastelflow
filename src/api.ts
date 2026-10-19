@@ -1,6 +1,9 @@
+export type PageKind = 'page' | 'database' | 'row';
+
 export type PageMeta = {
   id: string;
   parentId: string | null;
+  kind: PageKind;
   title: string;
   icon: string;
   cover: string;
@@ -11,9 +14,37 @@ export type PageMeta = {
   updatedAt: number;
 };
 
-export type Page = PageMeta & { content: unknown[] };
+export type PropType = 'text' | 'select' | 'date' | 'checkbox' | 'number';
+export type TagColor = 'p1' | 'p2' | 'p3' | 'p4' | 'p5' | 'p6';
+export type SelectOption = { id: string; name: string; color: TagColor };
+export type Property = { id: string; name: string; type: PropType; options?: SelectOption[] };
+export type Schema = {
+  properties: Property[];
+  board: { groupBy: string | null };
+  calendar: { dateProp: string | null };
+};
 
-export type PagePatch = Partial<Pick<Page, 'title' | 'icon' | 'cover' | 'content' | 'favorite' | 'position' | 'parentId'>>;
+// 속성 값: 텍스트·선택(옵션 id)·날짜(YYYY-MM-DD)는 문자열, 숫자, 체크박스는 참/거짓
+export type PropValue = string | number | boolean;
+export type Props = Record<string, PropValue>;
+
+export type Page = PageMeta & { content: unknown[]; schema?: Schema; props?: Props };
+
+export type Row = {
+  id: string;
+  title: string;
+  icon: string;
+  props: Props;
+  position: number;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type Database = Page & { schema: Schema; rows: Row[] };
+
+export type PagePatch = Partial<Pick<Page, 'title' | 'icon' | 'cover' | 'content' | 'favorite' | 'position' | 'parentId' | 'schema'>> & {
+  props?: Record<string, PropValue | null>;
+};
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -44,13 +75,18 @@ export const api = {
 
   listPages: () => request<PageMeta[]>('GET', '/api/pages'),
   getPage: (id: string) => request<Page>('GET', `/api/pages/${id}`),
-  createPage: (parentId: string | null = null) => request<Page>('POST', '/api/pages', { parentId }),
+  createPage: (parentId: string | null = null, kind: 'page' | 'database' = 'page') =>
+    request<Page>('POST', '/api/pages', { parentId, kind }),
   updatePage: (id: string, patch: PagePatch, keepalive = false) =>
     request<Page>('PATCH', `/api/pages/${id}`, patch, keepalive),
   trashPage: (id: string) => request('POST', `/api/pages/${id}/trash`),
   restorePage: (id: string) => request('POST', `/api/pages/${id}/restore`),
   deletePage: (id: string) => request('DELETE', `/api/pages/${id}`),
   emptyTrash: () => request('POST', '/api/trash/empty'),
+
+  getDatabase: (id: string) => request<Database>('GET', `/api/databases/${id}`),
+  createRow: (dbId: string, init: { title?: string; props?: Props; position?: number } = {}) =>
+    request<Page>('POST', `/api/databases/${dbId}/rows`, init),
 
   getSettings: () => request<Record<string, unknown>>('GET', '/api/settings'),
   putSettings: (s: unknown) => request('PUT', '/api/settings', s),

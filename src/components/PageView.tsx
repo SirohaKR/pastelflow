@@ -1,10 +1,12 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { api, type Page, type PagePatch } from '../api';
 import type { Width } from '../theme';
+import { useAutosave, type SaveState } from '../useAutosave';
 import { Editor } from './Editor';
 import { CoverPicker, EmojiPicker, randomCover, randomEmoji } from './Pickers';
+import { DatabaseView } from './database/DatabaseView';
 
-export type SaveState = 'saved' | 'saving' | 'error';
+export type { SaveState };
 
 type Props = {
   page: Page;
@@ -14,21 +16,21 @@ type Props = {
   onMetaChange: (id: string, patch: PagePatch) => void;
   onSaveState: (s: SaveState) => void;
   onError: (msg: string) => void;
+  // 휴지통에서 되돌리기 등으로 페이지 목록이 바뀔 때마다 올라가는 숫자 (데이터베이스 행을 다시 불러옴)
+  dataVersion: number;
+  onPagesChanged: () => void;
 };
 
-const SAVE_DELAY = 700;
-
-export function PageView({ page, dark, width, autoFocusTitle, onMetaChange, onSaveState, onError }: Props) {
+export function PageView({ page, dark, width, autoFocusTitle, onMetaChange, onSaveState, onError, dataVersion, onPagesChanged }: Props) {
   const [title, setTitle] = useState(page.title);
   const [icon, setIcon] = useState(page.icon);
   const [cover, setCover] = useState(page.cover);
   const [emojiAnchor, setEmojiAnchor] = useState<HTMLElement | null>(null);
   const [coverAnchor, setCoverAnchor] = useState<HTMLElement | null>(null);
 
-  // 바뀐 내용을 모았다가 잠깐 멈추면 한 번에 저장
-  const pending = useRef<PagePatch>({});
-  const timer = useRef<number>();
   const pageId = page.id;
+  const isDb = page.kind === 'database';
+  const { queue } = useAutosave(pageId, onSaveState, onError);
 
   // 긴 제목은 줄바꿈해서 보여 준다
   const titleRef = useRef<HTMLTextAreaElement>(null);
@@ -38,41 +40,6 @@ export function PageView({ page, dark, width, autoFocusTitle, onMetaChange, onSa
     el.style.height = 'auto';
     el.style.height = `${el.scrollHeight}px`;
   }, [title, width]);
-
-  const flush = (keepalive = false) => {
-    window.clearTimeout(timer.current);
-    const patch = pending.current;
-    if (!Object.keys(patch).length) return;
-    pending.current = {};
-    onSaveState('saving');
-    api
-      .updatePage(pageId, patch, keepalive)
-      .then(() => {
-        if (!Object.keys(pending.current).length) onSaveState('saved');
-      })
-      .catch((e) => {
-        onSaveState('error');
-        onError(e.message);
-      });
-  };
-
-  const queue = (patch: PagePatch, immediate = false) => {
-    pending.current = { ...pending.current, ...patch };
-    onSaveState('saving');
-    window.clearTimeout(timer.current);
-    if (immediate) flush();
-    else timer.current = window.setTimeout(flush, SAVE_DELAY);
-  };
-
-  useEffect(() => {
-    const onLeave = () => flush(true);
-    window.addEventListener('beforeunload', onLeave);
-    return () => {
-      window.removeEventListener('beforeunload', onLeave);
-      flush(true);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pageId]);
 
   const updateMeta = (patch: PagePatch, immediate = false) => {
     onMetaChange(pageId, patch);
@@ -106,7 +73,7 @@ export function PageView({ page, dark, width, autoFocusTitle, onMetaChange, onSa
         </div>
       )}
 
-      <div className={`page ${width}`}>
+      <div className={`page ${isDb ? 'full' : width}`}>
         <div className="page-head">
           {icon && (
             <button className="page-icon" onClick={(e) => setEmojiAnchor(e.currentTarget)} title="아이콘 바꾸기">
@@ -154,17 +121,28 @@ export function PageView({ page, dark, width, autoFocusTitle, onMetaChange, onSa
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
                 e.preventDefault();
-                (document.querySelector('.editor-wrap [contenteditable]') as HTMLElement | null)?.focus();
+                if (!isDb) (document.querySelector('.editor-wrap [contenteditable]') as HTMLElement | null)?.focus();
               }
             }}
           />
         </div>
 
-        <Editor
-          initialContent={page.content}
-          dark={dark}
-          onChange={(content) => queue({ content })}
-        />
+        {isDb ? (
+          <DatabaseView
+            dbId={pageId}
+            dark={dark}
+            dataVersion={dataVersion}
+            onSaveState={onSaveState}
+            onError={onError}
+            onPagesChanged={onPagesChanged}
+          />
+        ) : (
+          <Editor
+            initialContent={page.content}
+            dark={dark}
+            onChange={(content) => queue({ content })}
+          />
+        )}
       </div>
 
       {emojiAnchor && (

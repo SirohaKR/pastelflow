@@ -34,6 +34,7 @@ export default function App() {
   const [dialog, setDialog] = useState<'search' | 'trash' | 'settings' | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [toast, setToast] = useState('');
+  const [dataVersion, setDataVersion] = useState(0);
 
   const showError = useCallback((msg: string) => {
     setToast(msg);
@@ -53,7 +54,10 @@ export default function App() {
 
   const authed = auth?.authed;
 
-  const reloadPages = useCallback(() => api.listPages().then(setPages), []);
+  const reloadPages = useCallback(() => api.listPages().then((ps) => {
+    setPages(ps);
+    setDataVersion((v) => v + 1);
+  }), []);
 
   useEffect(() => {
     if (!authed) return;
@@ -138,12 +142,12 @@ export default function App() {
 
   // 버튼을 빠르게 두 번 눌러도 페이지가 하나만 생기게
   const creating = useRef(false);
-  const create = async (parentId: string | null) => {
+  const create = async (parentId: string | null, kind: 'page' | 'database' = 'page') => {
     if (creating.current) return;
     creating.current = true;
     try {
       (document.activeElement as HTMLElement | null)?.blur();
-      const p = await api.createPage(parentId);
+      const p = await api.createPage(parentId, kind);
       setPages((ps) => [...(ps || []), p]);
       setFreshId(p.id);
       // 새 페이지는 이미 내용을 알고 있으니 다시 불러오지 않고 바로 보여 준다
@@ -268,13 +272,18 @@ export default function App() {
               onMetaChange={patchMeta}
               onSaveState={setSaveState}
               onError={showError}
+              dataVersion={dataVersion}
+              onPagesChanged={reloadPages}
             />
           ) : !currentId ? (
             <div className="empty-state">
               <div>
                 <div className="big">🌷</div>
                 <p>페이지가 없어요. 첫 페이지를 만들어 볼까요?</p>
-                <button className="btn" onClick={() => create(null)}>➕ 새 페이지</button>
+                <div className="empty-actions">
+                  <button className="btn" onClick={() => create(null)}>➕ 새 페이지</button>
+                  <button className="btn ghost" onClick={() => create(null, 'database')}>🗃️ 새 데이터베이스</button>
+                </div>
               </div>
             </div>
           ) : null}
