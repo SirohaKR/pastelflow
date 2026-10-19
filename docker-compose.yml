@@ -11,7 +11,8 @@ services:
       APP_PASSWORD: ${APP_PASSWORD:-}
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-20}
       TZ: Asia/Seoul
-    # 시놀로지에서는 data 폴더의 소유자를 맞춰 주세요 (README 참고)
-    user: "${PUID:-1000}:${PGID:-1000}"
+      # 서버를 실행할 NAS 사용자 번호. 켜질 때 data 폴더 주인도 이 번호로 맞춰요.
+      PUID: ${PUID:-1041}
+      PGID: ${PGID:-100}
     volumes:
       - ./data:/data

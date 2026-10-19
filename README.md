@@ -48,7 +48,7 @@
 
    ```bash
    cd /volume1/docker
-   git clone https://github.com/<내-아이디>/pastelflow.git
+   git clone https://github.com/SirohaKR/pastelflow.git
    cd pastelflow
    ```
 
