@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { openDb, createRepo, httpError } from './db.js';
 import { createWidgetRepo } from './widgets.js';
 import { createUserRepo, publicUser } from './users.js';
+import { setupRealtime } from './realtime.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.PORT || 5210);
@@ -104,6 +105,17 @@ app.use(['/api', '/uploads'], (req, res, next) => {
   const u = userFromRequest(req);
   if (!u) return res.status(401).json({ error: '로그인이 필요해요.' });
   req.user = u;
+  next();
+});
+
+// 페이지·데이터베이스를 바꾸면 다른 사람 화면에 알린다
+let realtime = null;
+app.use(['/api/pages', '/api/databases', '/api/trash'], (req, res, next) => {
+  if (req.method !== 'GET') {
+    res.on('finish', () => {
+      if (res.statusCode < 400) realtime?.broadcastChange(String(req.get('x-client-id') || ''));
+    });
+  }
   next();
 });
 
@@ -241,5 +253,7 @@ const server = app.listen(PORT, () => {
   if (users.count() === 0) console.log('아직 계정이 없어요. 브라우저로 접속해서 관리자 계정을 만들어 주세요.');
   if (process.env.APP_PASSWORD) console.log('APP_PASSWORD 는 0.5.0 부터 쓰지 않아요. 계정으로 로그인해 주세요.');
 });
+
+realtime = setupRealtime(server, { repo, userFromRequest });
 
 export { app, server, repo, users };

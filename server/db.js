@@ -198,6 +198,8 @@ export function createRepo(db) {
     list: (uid) => stmt.list.all(uid).map((r) => toPage(r)),
     get: (id, uid) => (visible(stmt.get.get(id), uid) ? view(id) : null),
     canAccess: (id, uid) => visible(stmt.get.get(id), uid),
+    // 권한 확인 없이 (동시 편집 서버가 이미 확인한 뒤 쓴다)
+    getRaw: (id) => view(id),
 
     // private: 최상위에 만들 때 개인 페이지로 만들지. 하위 페이지는 부모를 따른다
     create({ parentId = null, kind = 'page', title = '', icon = '', cover = '', content = [], props = {}, position, private: isPrivate = false } = {}, uid = null) {
@@ -242,7 +244,11 @@ export function createRepo(db) {
       if (typeof patch.title === 'string') set('title', patch.title.slice(0, 300));
       if (typeof patch.icon === 'string') set('icon', patch.icon.slice(0, 32));
       if (typeof patch.cover === 'string') set('cover', patch.cover.slice(0, 500));
-      if (Array.isArray(patch.content)) set('content', JSON.stringify(patch.content));
+      if (Array.isArray(patch.content)) {
+        set('content', JSON.stringify(patch.content));
+        // 본문을 통째로 바꾸면 동시 편집 상태는 다음에 열 때 새로 만든다
+        set('ydoc', null);
+      }
       if (typeof patch.favorite === 'boolean') set('favorite', patch.favorite ? 1 : 0);
       if (typeof patch.position === 'number' && Number.isFinite(patch.position)) set('position', patch.position);
       if (patch.schema !== undefined) {

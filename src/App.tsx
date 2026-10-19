@@ -5,7 +5,9 @@ import { ancestors, displayTitle, dropTarget, isInSubtree, type DropZone } from 
 import { Sidebar } from './components/Sidebar';
 import { PageView, type SaveState } from './components/PageView';
 import { SearchDialog, SettingsDialog, TrashDialog } from './components/Dialogs';
-import { AuthScreen, MembersDialog, ProfileDialog } from './components/Account';
+import { AuthScreen, Avatar, MembersDialog, ProfileDialog } from './components/Account';
+import { MeContext } from './session';
+import { useLive } from './useLive';
 import { Home } from './components/home/Home';
 import { WidgetPage } from './components/home/WidgetPage';
 
@@ -36,7 +38,7 @@ function loadExpanded() {
 
 export default function App() {
   const [auth, setAuth] = useState<AuthStatus | null>(null);
-  const [, setUsers] = useState<User[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [settings, setSettings] = useState<Settings>(cachedSettings);
   const [dark, setDark] = useState(() => applyTheme(cachedSettings()));
   const [pages, setPages] = useState<PageMeta[] | null>(null);
@@ -86,6 +88,17 @@ export default function App() {
       setDark(applyTheme(s));
     }).catch(() => {});
   }, [authed, reloadPages, showError]);
+
+  // ── 실시간: 다른 사람 변경 알림과 접속자 ──
+  const liveTimer = useRef<number>();
+  const onRemoteChange = useCallback(() => {
+    window.clearTimeout(liveTimer.current);
+    liveTimer.current = window.setTimeout(() => {
+      reloadPages().catch(() => {});
+      api.users().then(setUsers).catch(() => {});
+    }, 300);
+  }, [reloadPages]);
+  const viewers = useLive(authed, currentId, onRemoteChange);
 
   // ── 테마 ──
   const changeSettings = (s: Settings) => {
@@ -273,9 +286,15 @@ export default function App() {
   if (!pages) return <div className="empty-state">불러오는 중…</div>;
 
   const crumbs = ancestors(pages, currentId);
+  // 지금 이 페이지를 같이 보고 있는 다른 사람
+  const watching = (currentId ? viewers[currentId] ?? [] : [])
+    .filter((id) => id !== me.id)
+    .map((id) => users.find((u) => u.id === id))
+    .filter((u): u is User => !!u);
   const saveLabel = { saved: '저장됨', saving: '저장 중…', error: '저장 실패' }[saveState];
 
   return (
+    <MeContext.Provider value={me}>
     <div className={`app ${sidebarOpen ? '' : 'sidebar-closed'}`}>
       <Sidebar
         pages={pages}
@@ -318,6 +337,12 @@ export default function App() {
               </span>
             ))}
           </nav>
+          {watching.length > 0 && (
+            <div className="viewers" title={`${watching.map((u) => u.nickname).join(', ')} 님이 같이 보고 있어요`}>
+              {watching.slice(0, 4).map((u) => <Avatar key={u.id} user={u} size={26} ring />)}
+              {watching.length > 4 && <span className="viewers-more">+{watching.length - 4}</span>}
+            </div>
+          )}
           {page && <span className="save-state">{saveLabel}</span>}
           {page && (
             <button
@@ -344,6 +369,7 @@ export default function App() {
               onError={showError}
               dataVersion={dataVersion}
               onPagesChanged={reloadPages}
+              meta={pages.find((p) => p.id === page.id)}
             />
           ) : !currentId ? (
             widgetId ? (
@@ -366,5 +392,6 @@ export default function App() {
       {dialog === 'members' && <MembersDialog me={me} onClose={() => setDialog(null)} onError={showError} />}
       {toast && <div className="toast">{toast}</div>}
     </div>
+    </MeContext.Provider>
   );
 }

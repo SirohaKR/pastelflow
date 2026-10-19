@@ -8,6 +8,11 @@ export default defineConfig({
   build: { chunkSizeWarningLimit: 2000 },
   server: {
     port: 5173,
-    proxy: { '/api': api, '/uploads': api },
+    proxy: {
+      '/api': api,
+      '/uploads': api,
+      '/collab': { target: api, ws: true },
+      '/events': { target: api, ws: true },
+    },
   },
 });

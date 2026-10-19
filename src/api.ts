@@ -1,3 +1,4 @@
+import { CLIENT_ID } from './session';
 export type PageKind = 'page' | 'database' | 'row';
 
 export type PageMeta = {
@@ -86,11 +87,11 @@ export class ApiError extends Error {
 }
 
 async function request<T>(method: string, url: string, body?: unknown, keepalive = false): Promise<T> {
-  const init: RequestInit = { method, keepalive, credentials: 'same-origin' };
+  const init: RequestInit = { method, keepalive, credentials: 'same-origin', headers: { 'X-Client-Id': CLIENT_ID } };
   if (body instanceof FormData) init.body = body;
   else if (body !== undefined) {
     init.body = JSON.stringify(body);
-    init.headers = { 'Content-Type': 'application/json' };
+    init.headers = { 'X-Client-Id': CLIENT_ID, 'Content-Type': 'application/json' };
   }
   const res = await fetch(url, init);
   const data = await res.json().catch(() => ({}));

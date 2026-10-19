@@ -1,5 +1,5 @@
-import { useLayoutEffect, useRef, useState } from 'react';
-import { api, type Page, type PagePatch } from '../api';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { api, type Page, type PageMeta, type PagePatch } from '../api';
 import type { Width } from '../theme';
 import { useAutosave, type SaveState } from '../useAutosave';
 import { Editor } from './Editor';
@@ -19,9 +19,11 @@ type Props = {
   // 휴지통에서 되돌리기 등으로 페이지 목록이 바뀔 때마다 올라가는 숫자 (데이터베이스 행을 다시 불러옴)
   dataVersion: number;
   onPagesChanged: () => void;
+  // 다른 사람이 바꾼 제목·아이콘·커버를 받아오는 최신 목록 값
+  meta?: PageMeta;
 };
 
-export function PageView({ page, dark, width, autoFocusTitle, onMetaChange, onSaveState, onError, dataVersion, onPagesChanged }: Props) {
+export function PageView({ page, dark, width, autoFocusTitle, onMetaChange, onSaveState, onError, dataVersion, onPagesChanged, meta }: Props) {
   const [title, setTitle] = useState(page.title);
   const [icon, setIcon] = useState(page.icon);
   const [cover, setCover] = useState(page.cover);
@@ -40,6 +42,15 @@ export function PageView({ page, dark, width, autoFocusTitle, onMetaChange, onSa
     el.style.height = 'auto';
     el.style.height = `${el.scrollHeight}px`;
   }, [title, width]);
+
+  // 다른 사람이 바꾼 값 반영 (내가 제목을 쓰고 있을 때는 건드리지 않는다)
+  useEffect(() => {
+    if (!meta) return;
+    if (document.activeElement !== titleRef.current) setTitle(meta.title);
+    setIcon(meta.icon);
+    setCover(meta.cover);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meta?.title, meta?.icon, meta?.cover]);
 
   const updateMeta = (patch: PagePatch, immediate = false) => {
     onMetaChange(pageId, patch);
@@ -137,11 +148,7 @@ export function PageView({ page, dark, width, autoFocusTitle, onMetaChange, onSa
             onPagesChanged={onPagesChanged}
           />
         ) : (
-          <Editor
-            initialContent={page.content}
-            dark={dark}
-            onChange={(content) => queue({ content })}
-          />
+          <Editor pageId={pageId} dark={dark} />
         )}
       </div>
 

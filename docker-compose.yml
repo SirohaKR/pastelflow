@@ -8,8 +8,6 @@ services:
       # NAS 포트:컨테이너 포트 (앞쪽 숫자만 바꾸면 돼요)
       - "5190:5210"
     environment:
-      # 비워 두면 로그인 없이 열립니다. 외부에서 접속할 거라면 꼭 정해 주세요.
-      APP_PASSWORD: ${APP_PASSWORD:-}
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-20}
       TZ: Asia/Seoul
       # 서버를 실행할 NAS 사용자 번호. 켜질 때 data 폴더 주인도 이 번호로 맞춰요.

@@ -152,7 +152,7 @@ export function RowPeek({ row, ops, dark, onLocalChange, onClose, onDelete, onSa
             <div className="peek-divider" />
 
             {page ? (
-              <Editor initialContent={page.content} dark={dark} onChange={(content) => queue({ content })} />
+              <Editor pageId={page.id} dark={dark} />
             ) : (
               <div className="db-loading">본문을 불러오는 중…</div>
             )}
