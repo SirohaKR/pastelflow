@@ -48,6 +48,7 @@ const shortId = () => randomUUID().slice(0, 8);
 function defaultSchema() {
   const status = shortId();
   const date = shortId();
+  const end = shortId();
   return {
     properties: [
       {
@@ -58,10 +59,12 @@ function defaultSchema() {
         ],
       },
       { id: date, name: '날짜', type: 'date' },
+      { id: end, name: '마감일', type: 'date' },
       { id: shortId(), name: '중요', type: 'checkbox' },
     ],
     board: { groupBy: status },
     calendar: { dateProp: date },
+    timeline: { startProp: date, endProp: end, groupBy: status },
   };
 }
 
@@ -89,6 +92,11 @@ function cleanSchema(raw) {
     properties,
     board: { groupBy: pick(raw.board?.groupBy, 'select') },
     calendar: { dateProp: pick(raw.calendar?.dateProp, 'date') },
+    timeline: {
+      startProp: pick(raw.timeline?.startProp, 'date'),
+      endProp: pick(raw.timeline?.endProp, 'date'),
+      groupBy: pick(raw.timeline?.groupBy, 'select'),
+    },
   };
 }
 
@@ -187,6 +195,15 @@ export function createRepo(db) {
       const rowProps = kind === 'row' ? JSON.stringify(mergeProps({}, props)) : '{}';
       stmt.insert.run(id, parentId, kind, str(title, 300), icon, cover, JSON.stringify(content), rowProps, schema, pos, now, now);
       return repo.get(id);
+    },
+
+    // 홈 위젯이 쓰는 모든 데이터베이스 (휴지통 제외)와 행
+    allDatabases() {
+      const dbs = db.prepare("SELECT * FROM pages WHERE kind = 'database' AND deleted_at IS NULL ORDER BY position, created_at").all();
+      return dbs.map((row) => {
+        const page = toPage(row, true);
+        return { id: page.id, title: page.title, icon: page.icon, schema: page.schema, rows: stmt.rows.all(page.id).map(toRow) };
+      });
     },
 
     database(id) {

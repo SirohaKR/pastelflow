@@ -1,11 +1,12 @@
 import type { Property, PropType, PropValue, Row, Schema, SelectOption, TagColor } from './api';
 
-export type ViewKind = 'table' | 'board' | 'calendar';
+export type ViewKind = 'table' | 'board' | 'calendar' | 'timeline';
 
 export const VIEWS: { key: ViewKind; label: string; icon: string }[] = [
   { key: 'table', label: '표', icon: '▦' },
   { key: 'board', label: '칸반', icon: '▥' },
   { key: 'calendar', label: '캘린더', icon: '📅' },
+  { key: 'timeline', label: '타임라인', icon: '☰' },
 ];
 
 export const PROP_TYPES: { type: PropType; label: string; icon: string }[] = [
@@ -109,4 +110,32 @@ export function defaultBoardProp(schema: Schema) {
 export function defaultDateProp(schema: Schema) {
   const id = schema.calendar.dateProp;
   return schema.properties.find((p) => p.id === id && p.type === 'date') ?? schema.properties.find((p) => p.type === 'date') ?? null;
+}
+
+// 타임라인: 시작일·종료일·묶기 속성 (설정이 없거나 지워졌으면 알맞은 걸 고른다)
+export function timelineProps(schema: Schema) {
+  const t = schema.timeline;
+  const dates = schema.properties.filter((p) => p.type === 'date');
+  const start = dates.find((p) => p.id === t?.startProp) ?? defaultDateProp(schema);
+  const end = t ? dates.find((p) => p.id === t.endProp && p.id !== start?.id) ?? null : dates.find((p) => p.id !== start?.id) ?? null;
+  const group = t ? schema.properties.find((p) => p.id === t.groupBy && p.type === 'select') ?? null : defaultBoardProp(schema);
+  return { start, end, group };
+}
+
+export function parseKey(key: string) {
+  const [y, m, d] = key.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+export function addDays(key: string, n: number) {
+  const d = parseKey(key);
+  d.setDate(d.getDate() + n);
+  return toKey(d);
+}
+
+// 두 날짜 사이 일수 (b - a)
+export function diffDays(a: string, b: string) {
+  const [ay, am, ad] = a.split('-').map(Number);
+  const [by, bm, bd] = b.split('-').map(Number);
+  return Math.round((Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)) / 86400000);
 }

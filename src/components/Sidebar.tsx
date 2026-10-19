@@ -17,6 +17,7 @@ type Props = {
   onTrashOpen: () => void;
   onSettings: () => void;
   onCollapse: () => void;
+  onHome: () => void;
 };
 
 export function Sidebar(props: Props) {
@@ -35,6 +36,7 @@ export function Sidebar(props: Props) {
       </div>
 
       <div className="side-actions">
+        <button className={`side-action ${props.currentId === null ? 'on' : ''}`} onClick={props.onHome}>🏠 홈</button>
         <button className="side-action" onClick={props.onSearch}>
           🔍 검색 <kbd>{isMac ? '⌘' : 'Ctrl'} K</kbd>
         </button>

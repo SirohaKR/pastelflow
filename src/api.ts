@@ -22,6 +22,8 @@ export type Schema = {
   properties: Property[];
   board: { groupBy: string | null };
   calendar: { dateProp: string | null };
+  // 0.3.0 에 생긴 설정이라 예전 데이터베이스에는 없을 수 있다
+  timeline?: { startProp: string | null; endProp: string | null; groupBy: string | null };
 };
 
 // 속성 값: 텍스트·선택(옵션 id)·날짜(YYYY-MM-DD)는 문자열, 숫자, 체크박스는 참/거짓
@@ -41,6 +43,22 @@ export type Row = {
 };
 
 export type Database = Page & { schema: Schema; rows: Row[] };
+
+export type WidgetType = 'today' | 'todo' | 'calendar' | 'dday' | 'habits' | 'memo' | 'recent' | 'links' | 'budget' | 'goals';
+export type WidgetSize = 's' | 'm' | 'l';
+export type Widget = {
+  id: string;
+  type: WidgetType;
+  size: WidgetSize;
+  color: '' | TagColor;
+  position: number;
+  config: Record<string, unknown>;
+  updatedAt: number;
+};
+export type WidgetPatch = Partial<Pick<Widget, 'size' | 'color' | 'position' | 'config'>>;
+
+// 홈 위젯이 받는 데이터베이스 묶음
+export type AgendaDb = { id: string; title: string; icon: string; schema: Schema; rows: Row[] };
 
 export type PagePatch = Partial<Pick<Page, 'title' | 'icon' | 'cover' | 'content' | 'favorite' | 'position' | 'parentId' | 'schema'>> & {
   props?: Record<string, PropValue | null>;
@@ -87,6 +105,12 @@ export const api = {
   getDatabase: (id: string) => request<Database>('GET', `/api/databases/${id}`),
   createRow: (dbId: string, init: { title?: string; props?: Props; position?: number } = {}) =>
     request<Page>('POST', `/api/databases/${dbId}/rows`, init),
+
+  listWidgets: () => request<Widget[]>('GET', '/api/widgets'),
+  createWidget: (type: WidgetType, size: WidgetSize) => request<Widget>('POST', '/api/widgets', { type, size }),
+  updateWidget: (id: string, patch: WidgetPatch, keepalive = false) => request<Widget>('PATCH', `/api/widgets/${id}`, patch, keepalive),
+  deleteWidget: (id: string) => request('DELETE', `/api/widgets/${id}`),
+  agenda: () => request<AgendaDb[]>('GET', '/api/agenda'),
 
   getSettings: () => request<Record<string, unknown>>('GET', '/api/settings'),
   putSettings: (s: unknown) => request('PUT', '/api/settings', s),

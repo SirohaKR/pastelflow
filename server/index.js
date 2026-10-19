@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { openDb, createRepo, httpError } from './db.js';
+import { createWidgetRepo } from './widgets.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.PORT || 5210);
@@ -16,7 +17,9 @@ const COOKIE = 'pf_session';
 const SESSION_DAYS = 30;
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-const repo = createRepo(openDb(DATA_DIR));
+const sqlite = openDb(DATA_DIR);
+const repo = createRepo(sqlite);
+const widgets = createWidgetRepo(sqlite);
 
 let secret = repo.getSecret();
 if (!secret) {
@@ -119,6 +122,17 @@ app.post('/api/databases/:id/rows', (req, res) => {
   const { title = '', props = {}, position } = req.body || {};
   res.status(201).json(repo.create({ parentId: req.params.id, kind: 'row', title, props, position }));
 });
+
+// 홈 위젯
+app.get('/api/widgets', (_req, res) => res.json(widgets.list()));
+app.post('/api/widgets', (req, res) => res.status(201).json(widgets.create(req.body || {})));
+app.patch('/api/widgets/:id', (req, res) => res.json(widgets.update(req.params.id, req.body || {})));
+app.delete('/api/widgets/:id', (req, res) => {
+  widgets.remove(req.params.id);
+  res.json({ ok: true });
+});
+// 할 일·캘린더 위젯이 보는 모든 데이터베이스
+app.get('/api/agenda', (_req, res) => res.json(repo.allDatabases()));
 
 app.get('/api/pages/:id', (req, res) => {
   const page = repo.get(req.params.id);

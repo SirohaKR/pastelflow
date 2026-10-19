@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type Page, type PageMeta, type PagePatch } from './api';
 import { applyTheme, cachedSettings, normalizeSettings, type Settings } from './theme';
-import { ancestors, childrenOf, displayTitle, dropTarget, isInSubtree, type DropZone } from './tree';
+import { ancestors, displayTitle, dropTarget, isInSubtree, type DropZone } from './tree';
 import { Sidebar } from './components/Sidebar';
 import { PageView, type SaveState } from './components/PageView';
 import { Login, SearchDialog, SettingsDialog, TrashDialog } from './components/Dialogs';
+import { Home } from './components/home/Home';
 
 const isNarrow = () => window.matchMedia('(max-width: 760px)').matches;
 
@@ -97,14 +98,10 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 
-  // 처음 들어왔거나 보던 페이지가 사라지면 첫 페이지로
+  // 보던 페이지가 사라지면 홈으로
   useEffect(() => {
-    if (!pages) return;
-    const cur = currentId && pages.find((p) => p.id === currentId && p.deletedAt == null);
-    if (!cur) {
-      const first = childrenOf(pages, null)[0];
-      if ((first?.id ?? null) !== currentId) open(first?.id ?? null, true);
-    }
+    if (!pages || !currentId) return;
+    if (!pages.some((p) => p.id === currentId && p.deletedAt == null)) open(null, true);
   }, [pages, currentId, open]);
 
   useEffect(() => {
@@ -230,6 +227,7 @@ export default function App() {
         onTrashOpen={() => setDialog('trash')}
         onSettings={() => setDialog('settings')}
         onCollapse={() => setSidebarOpen(false)}
+        onHome={() => open(null)}
       />
       {sidebarOpen && isNarrow() && <div className="scrim" onClick={() => setSidebarOpen(false)} />}
 
@@ -239,6 +237,7 @@ export default function App() {
             <button className="icon-btn" title="사이드바 열기" onClick={() => setSidebarOpen(true)}>☰</button>
           )}
           <nav className="crumbs">
+            {!currentId && <span className="crumb">🏠 홈</span>}
             {crumbs.map((c, i) => (
               <span key={c.id} style={{ display: 'contents' }}>
                 {i > 0 && <span>/</span>}
@@ -276,16 +275,7 @@ export default function App() {
               onPagesChanged={reloadPages}
             />
           ) : !currentId ? (
-            <div className="empty-state">
-              <div>
-                <div className="big">🌷</div>
-                <p>페이지가 없어요. 첫 페이지를 만들어 볼까요?</p>
-                <div className="empty-actions">
-                  <button className="btn" onClick={() => create(null)}>➕ 새 페이지</button>
-                  <button className="btn ghost" onClick={() => create(null, 'database')}>🗃️ 새 데이터베이스</button>
-                </div>
-              </div>
-            </div>
+            <Home pages={pages} dataVersion={dataVersion} openPage={open} onError={showError} />
           ) : null}
         </div>
       </main>

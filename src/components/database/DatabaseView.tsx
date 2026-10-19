@@ -6,6 +6,7 @@ import { AddPropertyMenu } from './Cells';
 import { TableView } from './TableView';
 import { BoardView } from './BoardView';
 import { CalendarView } from './CalendarView';
+import { TimelineView } from './TimelineView';
 import { RowPeek } from './RowPeek';
 
 export type RowPatch = { title?: string; icon?: string; props?: Record<string, PropValue | null>; position?: number };
@@ -37,7 +38,7 @@ type Props_ = {
 function loadView(dbId: string): ViewKind {
   try {
     const v = localStorage.getItem(`pf-view-${dbId}`);
-    if (v === 'table' || v === 'board' || v === 'calendar') return v;
+    if (v === 'table' || v === 'board' || v === 'calendar' || v === 'timeline') return v;
   } catch {
     /* 무시 */
   }
@@ -241,6 +242,7 @@ export function DatabaseView({ dbId, dark, dataVersion, onSaveState, onError, on
       {view === 'table' && <TableView ops={ops} />}
       {view === 'board' && <BoardView ops={ops} />}
       {view === 'calendar' && <CalendarView ops={ops} />}
+      {view === 'timeline' && <TimelineView ops={ops} />}
 
       {addPropAnchor && <AddPropertyMenu anchor={addPropAnchor} onClose={() => setAddPropAnchor(null)} onAdd={addProperty} />}
 
