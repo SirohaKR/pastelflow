@@ -97,6 +97,7 @@ export const api = {
     request<Page>('POST', '/api/pages', { parentId, kind }),
   updatePage: (id: string, patch: PagePatch, keepalive = false) =>
     request<Page>('PATCH', `/api/pages/${id}`, patch, keepalive),
+  duplicatePage: (id: string) => request<Page>('POST', `/api/pages/${id}/duplicate`),
   trashPage: (id: string) => request('POST', `/api/pages/${id}/trash`),
   restorePage: (id: string) => request('POST', `/api/pages/${id}/restore`),
   deletePage: (id: string) => request('DELETE', `/api/pages/${id}`),

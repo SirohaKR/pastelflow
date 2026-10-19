@@ -195,6 +195,17 @@ export default function App() {
     api.updatePage(id, { favorite: fav }).catch((e) => showError(e.message));
   };
 
+  const duplicate = async (id: string) => {
+    try {
+      const copy = await api.duplicatePage(id);
+      await reloadPages();
+      setPage(copy);
+      open(copy.id);
+    } catch (e) {
+      showError((e as Error).message);
+    }
+  };
+
   const trash = async (id: string) => {
     if (pages && currentId && isInSubtree(pages, id, currentId)) {
       const target = pages.find((p) => p.id === id);
@@ -243,6 +254,7 @@ export default function App() {
         onMove={move}
         onFavorite={favorite}
         onTrash={trash}
+        onDuplicate={duplicate}
         onSearch={() => setDialog('search')}
         onTrashOpen={() => setDialog('trash')}
         onSettings={() => setDialog('settings')}

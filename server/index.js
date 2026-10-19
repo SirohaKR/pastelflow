@@ -142,6 +142,8 @@ app.get('/api/pages/:id', (req, res) => {
 
 app.patch('/api/pages/:id', (req, res) => res.json(repo.update(req.params.id, req.body || {})));
 
+app.post('/api/pages/:id/duplicate', (req, res) => res.status(201).json(repo.duplicate(req.params.id)));
+
 app.post('/api/pages/:id/trash', (req, res) => {
   repo.trash(req.params.id);
   res.json({ ok: true });

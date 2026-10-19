@@ -13,6 +13,7 @@ type Props = {
   onMove: (id: string, target: PageMeta, zone: DropZone) => void;
   onFavorite: (id: string, favorite: boolean) => void;
   onTrash: (id: string) => void;
+  onDuplicate: (id: string) => void;
   onSearch: () => void;
   onTrashOpen: () => void;
   onSettings: () => void;
@@ -197,6 +198,14 @@ function TreeNode(props: NodeProps) {
               </>
             )}
             <button
+              onClick={() => {
+                props.onDuplicate(page.id);
+                setMenuAnchor(null);
+              }}
+            >
+              📄 복사본 만들기
+            </button>
+            <button
               className="danger"
               onClick={() => {
                 props.onTrash(page.id);
@@ -210,9 +219,6 @@ function TreeNode(props: NodeProps) {
       )}
 
       {open && kids.map((k) => <TreeNode key={k.id} {...props} page={k} depth={depth + 1} />)}
-      {open && !flat && !isDb && kids.length === 0 && (
-        <div className="side-empty" style={{ paddingLeft: 30 + depth * 16 }}>하위 페이지 없음</div>
-      )}
     </>
   );
 }

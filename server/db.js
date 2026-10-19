@@ -250,6 +250,35 @@ export function createRepo(db) {
       return repo.get(id);
     },
 
+    // 페이지를 하위 페이지·데이터베이스 항목까지 통째로 복사해서 바로 아래에 놓는다
+    duplicate(id) {
+      const src = stmt.get.get(id);
+      if (!src || src.deleted_at != null) throw httpError(404, '페이지를 찾을 수 없습니다.');
+      const next = db.prepare('SELECT MIN(position) AS p FROM pages WHERE parent_id IS ? AND position > ? AND deleted_at IS NULL')
+        .get(src.parent_id, src.position).p;
+      const position = next == null ? src.position + 1 : (src.position + next) / 2;
+      const kids = db.prepare('SELECT * FROM pages WHERE parent_id = ? AND deleted_at IS NULL ORDER BY position, created_at');
+      const now = Date.now();
+      let count = 0;
+      const copy = (row, parentId, pos, title) => {
+        if (++count > 5000) throw httpError(413, '복사할 페이지가 너무 많아요.');
+        const newId = randomUUID();
+        stmt.insert.run(newId, parentId, row.kind, title, row.icon, row.cover, row.content, row.props, row.schema, pos, now, now);
+        for (const child of kids.all(row.id)) copy(child, newId, child.position, child.title);
+        return newId;
+      };
+      db.exec('BEGIN');
+      try {
+        const title = `${src.title.trim() || '제목 없음'} (사본)`.slice(0, 300);
+        const newId = copy(src, src.parent_id, position, title);
+        db.exec('COMMIT');
+        return repo.get(newId);
+      } catch (err) {
+        db.exec('ROLLBACK');
+        throw err;
+      }
+    },
+
     trash(id) {
       if (!stmt.get.get(id)) throw httpError(404, '페이지를 찾을 수 없습니다.');
       const now = Date.now();
