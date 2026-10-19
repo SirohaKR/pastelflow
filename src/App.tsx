@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, type Page, type PageMeta, type PagePatch } from './api';
+import { api, type AuthStatus, type Page, type PageMeta, type PagePatch, type User } from './api';
 import { applyTheme, cachedSettings, normalizeSettings, type Settings } from './theme';
 import { ancestors, displayTitle, dropTarget, isInSubtree, type DropZone } from './tree';
 import { Sidebar } from './components/Sidebar';
 import { PageView, type SaveState } from './components/PageView';
-import { Login, SearchDialog, SettingsDialog, TrashDialog } from './components/Dialogs';
+import { SearchDialog, SettingsDialog, TrashDialog } from './components/Dialogs';
+import { AuthScreen, MembersDialog, ProfileDialog } from './components/Account';
 import { Home } from './components/home/Home';
 import { WidgetPage } from './components/home/WidgetPage';
 
@@ -20,6 +21,11 @@ function widgetFromPath() {
   return m ? m[1] : null;
 }
 
+function inviteFromPath() {
+  const m = location.pathname.match(/^\/invite\/([\w-]+)/);
+  return m ? m[1] : null;
+}
+
 function loadExpanded() {
   try {
     return new Set<string>(JSON.parse(localStorage.getItem('pf-expanded') || '[]'));
@@ -29,7 +35,8 @@ function loadExpanded() {
 }
 
 export default function App() {
-  const [auth, setAuth] = useState<{ required: boolean; authed: boolean } | null>(null);
+  const [auth, setAuth] = useState<AuthStatus | null>(null);
+  const [, setUsers] = useState<User[]>([]);
   const [settings, setSettings] = useState<Settings>(cachedSettings);
   const [dark, setDark] = useState(() => applyTheme(cachedSettings()));
   const [pages, setPages] = useState<PageMeta[] | null>(null);
@@ -40,7 +47,7 @@ export default function App() {
   const [freshId, setFreshId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(loadExpanded);
   const [sidebarOpen, setSidebarOpen] = useState(() => !isNarrow());
-  const [dialog, setDialog] = useState<'search' | 'trash' | 'settings' | null>(null);
+  const [dialog, setDialog] = useState<'search' | 'trash' | 'settings' | 'profile' | 'members' | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [toast, setToast] = useState('');
   const [dataVersion, setDataVersion] = useState(0);
@@ -56,12 +63,13 @@ export default function App() {
   }, [showError]);
   useEffect(checkAuth, [checkAuth]);
   useEffect(() => {
-    const onUnauthorized = () => setAuth((a) => (a ? { ...a, authed: false } : a));
+    const onUnauthorized = () => setAuth((a) => (a ? { ...a, user: null } : a));
     window.addEventListener('pf:unauthorized', onUnauthorized);
     return () => window.removeEventListener('pf:unauthorized', onUnauthorized);
   }, []);
 
-  const authed = auth?.authed;
+  const me = auth?.user ?? null;
+  const authed = !!me;
 
   const reloadPages = useCallback(() => api.listPages().then((ps) => {
     setPages(ps);
@@ -71,6 +79,7 @@ export default function App() {
   useEffect(() => {
     if (!authed) return;
     reloadPages().catch((e) => showError(e.message));
+    api.users().then(setUsers).catch(() => {});
     api.getSettings().then((raw) => {
       const s = normalizeSettings(raw);
       setSettings(s);
@@ -159,12 +168,12 @@ export default function App() {
 
   // 버튼을 빠르게 두 번 눌러도 페이지가 하나만 생기게
   const creating = useRef(false);
-  const create = async (parentId: string | null, kind: 'page' | 'database' = 'page') => {
+  const create = async (parentId: string | null, kind: 'page' | 'database' = 'page', isPrivate = false) => {
     if (creating.current) return;
     creating.current = true;
     try {
       (document.activeElement as HTMLElement | null)?.blur();
-      const p = await api.createPage(parentId, kind);
+      const p = await api.createPage(parentId, kind, isPrivate);
       setPages((ps) => [...(ps || []), p]);
       setFreshId(p.id);
       // 새 페이지는 이미 내용을 알고 있으니 다시 불러오지 않고 바로 보여 준다
@@ -179,11 +188,26 @@ export default function App() {
 
   const move = async (id: string, target: PageMeta, zone: DropZone) => {
     if (!pages) return;
-    const dest = dropTarget(pages, target, zone, id);
+    const dest: PagePatch = dropTarget(pages, target, zone, id);
+    // 최상위로 놓으면 놓은 자리의 구역(공용/내 페이지)을 따른다
+    if (!dest.parentId) dest.private = target.private;
     patchMeta(id, dest);
     if (zone === 'inside') toggle(target.id, true);
     try {
       await api.updatePage(id, dest);
+      // 구역이 바뀌면 하위 페이지도 함께 바뀌므로 다시 불러온다
+      if (pages.find((p) => p.id === id)?.private !== (dest.private ?? pages.find((p) => p.id === dest.parentId)?.private)) reloadPages();
+    } catch (e) {
+      showError((e as Error).message);
+      reloadPages();
+    }
+  };
+
+  const setPrivate = async (id: string, isPrivate: boolean) => {
+    patchMeta(id, { parentId: null, private: isPrivate });
+    try {
+      await api.updatePage(id, { parentId: null, private: isPrivate });
+      await reloadPages();
     } catch (e) {
       showError((e as Error).message);
       reloadPages();
@@ -236,7 +260,16 @@ export default function App() {
   }, []);
 
   if (!auth) return <div className="empty-state">불러오는 중…</div>;
-  if (!auth.authed) return <Login onDone={checkAuth} />;
+  if (!me) {
+    const invite = inviteFromPath();
+    const done = (u: User) => {
+      if (invite) history.replaceState(null, '', '/');
+      setAuth({ setup: false, user: u });
+    };
+    if (auth.setup) return <AuthScreen mode="setup" onDone={done} />;
+    if (invite) return <AuthScreen key="register" mode="register" inviteCode={invite} onDone={done} />;
+    return <AuthScreen key="login" mode="login" onDone={done} />;
+  }
   if (!pages) return <div className="empty-state">불러오는 중…</div>;
 
   const crumbs = ancestors(pages, currentId);
@@ -260,6 +293,10 @@ export default function App() {
         onSettings={() => setDialog('settings')}
         onCollapse={() => setSidebarOpen(false)}
         onHome={() => open(null)}
+        me={me}
+        onProfile={() => setDialog('profile')}
+        onMembers={() => setDialog('members')}
+        onSetPrivate={setPrivate}
       />
       {sidebarOpen && isNarrow() && <div className="scrim" onClick={() => setSidebarOpen(false)} />}
 
@@ -276,7 +313,7 @@ export default function App() {
               <span key={c.id} style={{ display: 'contents' }}>
                 {i > 0 && <span>/</span>}
                 <button className="crumb" onClick={() => open(c.id)}>
-                  {c.icon && `${c.icon} `}{displayTitle(c)}
+                  {i === 0 && c.private && '🔒 '}{c.icon && `${c.icon} `}{displayTitle(c)}
                 </button>
               </span>
             ))}
@@ -321,8 +358,12 @@ export default function App() {
       {dialog === 'search' && <SearchDialog pages={pages} onOpen={open} onClose={() => setDialog(null)} />}
       {dialog === 'trash' && <TrashDialog pages={pages} onChanged={reloadPages} onClose={() => setDialog(null)} />}
       {dialog === 'settings' && (
-        <SettingsDialog settings={settings} onChange={changeSettings} onClose={() => setDialog(null)} canLogout={auth.required} />
+        <SettingsDialog settings={settings} onChange={changeSettings} onClose={() => setDialog(null)} />
       )}
+      {dialog === 'profile' && (
+        <ProfileDialog me={me} onChange={(u) => setAuth({ setup: false, user: u })} onClose={() => setDialog(null)} onError={showError} />
+      )}
+      {dialog === 'members' && <MembersDialog me={me} onClose={() => setDialog(null)} onError={showError} />}
       {toast && <div className="toast">{toast}</div>}
     </div>
   );

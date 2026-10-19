@@ -32,10 +32,13 @@ export function openDb(dataDir) {
   if (!cols.has('kind')) db.exec("ALTER TABLE pages ADD COLUMN kind TEXT NOT NULL DEFAULT 'page'");
   if (!cols.has('props')) db.exec("ALTER TABLE pages ADD COLUMN props TEXT NOT NULL DEFAULT '{}'");
   if (!cols.has('schema')) db.exec('ALTER TABLE pages ADD COLUMN schema TEXT');
+  // 0.5.0: 개인 페이지 주인 (NULL 이면 공용), 동시 편집 문서 상태
+  if (!cols.has('private_owner')) db.exec('ALTER TABLE pages ADD COLUMN private_owner TEXT');
+  if (!cols.has('ydoc')) db.exec('ALTER TABLE pages ADD COLUMN ydoc BLOB');
   return db;
 }
 
-const LIST_COLUMNS = 'id, parent_id, kind, title, icon, cover, position, favorite, deleted_at, created_at, updated_at';
+const LIST_COLUMNS = 'id, parent_id, kind, title, icon, cover, position, favorite, deleted_at, created_at, updated_at, private_owner';
 const ROW_COLUMNS = 'id, title, icon, props, position, created_at, updated_at';
 
 const KINDS = ['page', 'database', 'row'];
@@ -137,6 +140,7 @@ function toPage(row, withContent = false) {
     cover: row.cover,
     position: row.position,
     favorite: !!row.favorite,
+    private: row.private_owner != null,
     deletedAt: row.deleted_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -152,13 +156,16 @@ function toPage(row, withContent = false) {
 export function createRepo(db) {
   const stmt = {
     // 데이터베이스 행은 사이드바에 보이지 않는다 (휴지통에 들어간 행만 함께 내려준다)
-    list: db.prepare(`SELECT ${LIST_COLUMNS} FROM pages WHERE kind != 'row' OR deleted_at IS NOT NULL ORDER BY position, created_at`),
+    list: db.prepare(`SELECT ${LIST_COLUMNS} FROM pages
+      WHERE (kind != 'row' OR deleted_at IS NOT NULL) AND (private_owner IS NULL OR private_owner = ?)
+      ORDER BY position, created_at`),
     rows: db.prepare(`SELECT ${ROW_COLUMNS} FROM pages WHERE parent_id = ? AND kind = 'row' AND deleted_at IS NULL ORDER BY position, created_at`),
     get: db.prepare('SELECT * FROM pages WHERE id = ?'),
     children: db.prepare('SELECT id FROM pages WHERE parent_id = ?'),
     maxPos: db.prepare('SELECT COALESCE(MAX(position), 0) AS m FROM pages WHERE parent_id IS ?'),
-    insert: db.prepare(`INSERT INTO pages (id, parent_id, kind, title, icon, cover, content, props, schema, position, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+    insert: db.prepare(`INSERT INTO pages (id, parent_id, kind, title, icon, cover, content, props, schema, position, created_at, updated_at, private_owner)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+    setOwner: db.prepare('UPDATE pages SET private_owner = ? WHERE id = ?'),
     setDeleted: db.prepare('UPDATE pages SET deleted_at = ? WHERE id = ?'),
     remove: db.prepare('DELETE FROM pages WHERE id = ?'),
     count: db.prepare('SELECT COUNT(*) AS n FROM pages'),
@@ -178,14 +185,25 @@ export function createRepo(db) {
     return ids;
   }
 
-  const repo = {
-    list: () => stmt.list.all().map((r) => toPage(r)),
-    get: (id) => toPage(stmt.get.get(id), true),
+  // 볼 수 있는 페이지인가 (공용이거나 내 개인 페이지)
+  const visible = (row, uid) => !!row && (row.private_owner == null || row.private_owner === uid);
+  function access(id, uid) {
+    const row = stmt.get.get(id);
+    if (!visible(row, uid)) throw httpError(404, '페이지를 찾을 수 없습니다.');
+    return row;
+  }
+  const view = (id) => toPage(stmt.get.get(id), true);
 
-    create({ parentId = null, kind = 'page', title = '', icon = '', cover = '', content = [], props = {}, position } = {}) {
+  const repo = {
+    list: (uid) => stmt.list.all(uid).map((r) => toPage(r)),
+    get: (id, uid) => (visible(stmt.get.get(id), uid) ? view(id) : null),
+    canAccess: (id, uid) => visible(stmt.get.get(id), uid),
+
+    // private: 최상위에 만들 때 개인 페이지로 만들지. 하위 페이지는 부모를 따른다
+    create({ parentId = null, kind = 'page', title = '', icon = '', cover = '', content = [], props = {}, position, private: isPrivate = false } = {}, uid = null) {
       if (!KINDS.includes(kind)) throw httpError(400, '알 수 없는 페이지 종류예요.');
       const parent = parentId ? stmt.get.get(parentId) : null;
-      if (parentId && !parent) throw httpError(400, '상위 페이지가 없습니다.');
+      if (parentId && !visible(parent, uid)) throw httpError(400, '상위 페이지가 없습니다.');
       if (kind === 'row' && parent?.kind !== 'database') throw httpError(400, '행은 데이터베이스 안에만 만들 수 있어요.');
       if (kind !== 'row' && parent && parent.kind !== 'page') throw httpError(400, '데이터베이스 안에는 하위 페이지를 만들 수 없어요.');
       const id = randomUUID();
@@ -193,28 +211,30 @@ export function createRepo(db) {
       const pos = typeof position === 'number' && Number.isFinite(position) ? position : stmt.maxPos.get(parentId).m + 1;
       const schema = kind === 'database' ? JSON.stringify(defaultSchema()) : null;
       const rowProps = kind === 'row' ? JSON.stringify(mergeProps({}, props)) : '{}';
-      stmt.insert.run(id, parentId, kind, str(title, 300), icon, cover, JSON.stringify(content), rowProps, schema, pos, now, now);
-      return repo.get(id);
+      const owner = parent ? parent.private_owner : isPrivate && uid ? uid : null;
+      stmt.insert.run(id, parentId, kind, str(title, 300), icon, cover, JSON.stringify(content), rowProps, schema, pos, now, now, owner);
+      return view(id);
     },
 
     // 홈 위젯이 쓰는 모든 데이터베이스 (휴지통 제외)와 행
-    allDatabases() {
-      const dbs = db.prepare("SELECT * FROM pages WHERE kind = 'database' AND deleted_at IS NULL ORDER BY position, created_at").all();
+    allDatabases(uid) {
+      const dbs = db.prepare(`SELECT * FROM pages WHERE kind = 'database' AND deleted_at IS NULL
+        AND (private_owner IS NULL OR private_owner = ?) ORDER BY position, created_at`).all(uid);
       return dbs.map((row) => {
         const page = toPage(row, true);
         return { id: page.id, title: page.title, icon: page.icon, schema: page.schema, rows: stmt.rows.all(page.id).map(toRow) };
       });
     },
 
-    database(id) {
-      const page = repo.get(id);
+    database(id, uid) {
+      const page = repo.get(id, uid);
       if (!page || page.kind !== 'database') throw httpError(404, '데이터베이스를 찾을 수 없어요.');
       return { ...page, rows: stmt.rows.all(id).map(toRow) };
     },
 
-    update(id, patch) {
-      const cur = stmt.get.get(id);
-      if (!cur) throw httpError(404, '페이지를 찾을 수 없습니다.');
+    update(id, patch, uid) {
+      const cur = access(id, uid);
+      let owner = cur.private_owner;
       const fields = [];
       const values = [];
       const set = (col, val) => { fields.push(`${col} = ?`); values.push(val); };
@@ -238,22 +258,32 @@ export function createRepo(db) {
         const parentId = patch.parentId || null;
         if (parentId) {
           const parent = stmt.get.get(parentId);
-          if (!parent) throw httpError(400, '상위 페이지가 없습니다.');
+          if (!visible(parent, uid)) throw httpError(400, '상위 페이지가 없습니다.');
           if (parent.kind !== 'page') throw httpError(400, '데이터베이스 안으로는 옮길 수 없어요.');
           if (subtree(id).includes(parentId)) throw httpError(400, '자기 자신이나 하위 페이지 안으로는 옮길 수 없습니다.');
+          owner = parent.private_owner;
+        } else if (typeof patch.private === 'boolean') {
+          owner = patch.private ? uid : null;
         }
         set('parent_id', parentId);
+      } else if (typeof patch.private === 'boolean' && !cur.parent_id && cur.kind !== 'row') {
+        // 최상위 페이지를 공용 ↔ 내 페이지로 옮기기
+        owner = patch.private ? uid : null;
       }
-      if (!fields.length) return repo.get(id);
+      if (owner !== cur.private_owner) {
+        // 하위 페이지·데이터베이스 항목도 같이 옮긴다
+        for (const pid of subtree(id)) stmt.setOwner.run(owner, pid);
+      }
+      if (!fields.length && owner === cur.private_owner) return view(id);
       set('updated_at', Date.now());
       db.prepare(`UPDATE pages SET ${fields.join(', ')} WHERE id = ?`).run(...values, id);
-      return repo.get(id);
+      return view(id);
     },
 
     // 페이지를 하위 페이지·데이터베이스 항목까지 통째로 복사해서 바로 아래에 놓는다
-    duplicate(id) {
-      const src = stmt.get.get(id);
-      if (!src || src.deleted_at != null) throw httpError(404, '페이지를 찾을 수 없습니다.');
+    duplicate(id, uid) {
+      const src = access(id, uid);
+      if (src.deleted_at != null) throw httpError(404, '페이지를 찾을 수 없습니다.');
       const next = db.prepare('SELECT MIN(position) AS p FROM pages WHERE parent_id IS ? AND position > ? AND deleted_at IS NULL')
         .get(src.parent_id, src.position).p;
       const position = next == null ? src.position + 1 : (src.position + next) / 2;
@@ -263,7 +293,7 @@ export function createRepo(db) {
       const copy = (row, parentId, pos, title) => {
         if (++count > 5000) throw httpError(413, '복사할 페이지가 너무 많아요.');
         const newId = randomUUID();
-        stmt.insert.run(newId, parentId, row.kind, title, row.icon, row.cover, row.content, row.props, row.schema, pos, now, now);
+        stmt.insert.run(newId, parentId, row.kind, title, row.icon, row.cover, row.content, row.props, row.schema, pos, now, now, row.private_owner);
         for (const child of kids.all(row.id)) copy(child, newId, child.position, child.title);
         return newId;
       };
@@ -272,15 +302,15 @@ export function createRepo(db) {
         const title = `${src.title.trim() || '제목 없음'} (사본)`.slice(0, 300);
         const newId = copy(src, src.parent_id, position, title);
         db.exec('COMMIT');
-        return repo.get(newId);
+        return view(newId);
       } catch (err) {
         db.exec('ROLLBACK');
         throw err;
       }
     },
 
-    trash(id) {
-      if (!stmt.get.get(id)) throw httpError(404, '페이지를 찾을 수 없습니다.');
+    trash(id, uid) {
+      access(id, uid);
       const now = Date.now();
       for (const pid of subtree(id)) {
         const row = stmt.get.get(pid);
@@ -288,9 +318,8 @@ export function createRepo(db) {
       }
     },
 
-    restore(id) {
-      const row = stmt.get.get(id);
-      if (!row) throw httpError(404, '페이지를 찾을 수 없습니다.');
+    restore(id, uid) {
+      const row = access(id, uid);
       // 상위 페이지가 휴지통에 있으면 최상위로 꺼낸다
       if (row.parent_id) {
         const parent = stmt.get.get(row.parent_id);
@@ -304,23 +333,34 @@ export function createRepo(db) {
       for (const pid of subtree(id)) stmt.setDeleted.run(null, pid);
     },
 
-    destroy(id) {
+    destroy(id, uid) {
+      access(id, uid);
       const ids = subtree(id).reverse();
       for (const pid of ids) stmt.remove.run(pid);
     },
 
-    emptyTrash() {
-      const trashed = db.prepare('SELECT id FROM pages WHERE deleted_at IS NOT NULL').all();
-      for (const r of trashed) if (stmt.get.get(r.id)) repo.destroy(r.id);
+    emptyTrash(uid) {
+      const trashed = db.prepare('SELECT id FROM pages WHERE deleted_at IS NOT NULL AND (private_owner IS NULL OR private_owner = ?)').all(uid);
+      for (const r of trashed) if (stmt.get.get(r.id)) repo.destroy(r.id, uid);
     },
 
-    getSettings() {
-      const row = stmt.getSetting.get('ui');
+    // 화면 설정은 사람마다 따로 (예전 공용 설정은 첫 관리자에게 넘긴다)
+    getSettings(uid) {
+      const row = stmt.getSetting.get('ui:' + uid);
       return row ? JSON.parse(row.value) : {};
     },
-    putSettings(value) {
-      stmt.putSetting.run('ui', JSON.stringify(value));
+    putSettings(uid, value) {
+      stmt.putSetting.run('ui:' + uid, JSON.stringify(value));
       return value;
+    },
+    claimLegacySettings(uid) {
+      const row = stmt.getSetting.get('ui');
+      if (row && !stmt.getSetting.get('ui:' + uid)) stmt.putSetting.run('ui:' + uid, row.value);
+    },
+    // 동시 편집 문서 상태
+    getYdoc: (id) => stmt.get.get(id)?.ydoc ?? null,
+    saveYdoc(id, state, content) {
+      db.prepare('UPDATE pages SET ydoc = ?, content = ?, updated_at = ? WHERE id = ?').run(state, JSON.stringify(content), Date.now(), id);
     },
     getSecret() {
       return stmt.getSetting.get('session_secret')?.value;

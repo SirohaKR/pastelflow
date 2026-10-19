@@ -45,39 +45,54 @@ export function createWidgetRepo(db) {
       updated_at INTEGER NOT NULL
     );
   `);
+  // 0.5.0: 위젯은 사람마다 따로
+  const cols = new Set(db.prepare('PRAGMA table_info(widgets)').all().map((c) => c.name));
+  if (!cols.has('user_id')) db.exec('ALTER TABLE widgets ADD COLUMN user_id TEXT');
 
   const stmt = {
-    list: db.prepare('SELECT * FROM widgets ORDER BY position'),
+    list: db.prepare('SELECT * FROM widgets WHERE user_id = ? ORDER BY position'),
     get: db.prepare('SELECT * FROM widgets WHERE id = ?'),
-    maxPos: db.prepare('SELECT COALESCE(MAX(position), 0) AS m FROM widgets'),
-    insert: db.prepare('INSERT INTO widgets (id, type, size, color, position, config, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'),
-    remove: db.prepare('DELETE FROM widgets WHERE id = ?'),
-    getFlag: db.prepare("SELECT value FROM settings WHERE key = 'widgets_seeded'"),
-    setFlag: db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('widgets_seeded', '1')"),
+    maxPos: db.prepare('SELECT COALESCE(MAX(position), 0) AS m FROM widgets WHERE user_id = ?'),
+    insert: db.prepare('INSERT INTO widgets (id, type, size, color, position, config, updated_at, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
+    remove: db.prepare('DELETE FROM widgets WHERE id = ? AND user_id = ?'),
+    getFlag: db.prepare('SELECT value FROM settings WHERE key = ?'),
+    setFlag: db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, '1')"),
+  };
+
+  const mine = (id, uid) => {
+    const row = stmt.get.get(id);
+    if (!row || row.user_id !== uid) throw httpError(404, '위젯을 찾을 수 없어요.');
+    return row;
   };
 
   const repo = {
-    list() {
-      // 처음 한 번만 기본 위젯을 깔아 준다 (다 지운 뒤에 다시 생기지 않게)
-      if (!stmt.getFlag.get()) {
+    list(uid) {
+      // 사람마다 처음 한 번만 기본 위젯을 깔아 준다 (다 지운 뒤에 다시 생기지 않게)
+      const flag = 'widgets_seeded:' + uid;
+      if (!stmt.getFlag.get(flag)) {
         STARTER.forEach(([type, size, color], i) => {
-          stmt.insert.run(randomUUID(), type, size, color, i + 1, '{}', Date.now());
+          stmt.insert.run(randomUUID(), type, size, color, i + 1, '{}', Date.now(), uid);
         });
-        stmt.setFlag.run();
+        stmt.setFlag.run(flag);
       }
-      return stmt.list.all().map(toWidget);
+      return stmt.list.all(uid).map(toWidget);
     },
 
-    create({ type, size = 's', color = '' } = {}) {
+    // 계정이 생기기 전에 쓰던 위젯은 첫 관리자에게 넘긴다
+    claimLegacy(uid) {
+      const n = db.prepare('UPDATE widgets SET user_id = ? WHERE user_id IS NULL').run(uid).changes;
+      if (n || stmt.getFlag.get('widgets_seeded')) stmt.setFlag.run('widgets_seeded:' + uid);
+    },
+
+    create({ type, size = 's', color = '' } = {}, uid) {
       if (!WIDGET_TYPES.includes(type)) throw httpError(400, '알 수 없는 위젯이에요.');
       const id = randomUUID();
-      stmt.insert.run(id, type, SIZES.includes(size) ? size : 's', COLORS.includes(color) ? color : '', stmt.maxPos.get().m + 1, '{}', Date.now());
+      stmt.insert.run(id, type, SIZES.includes(size) ? size : 's', COLORS.includes(color) ? color : '', stmt.maxPos.get(uid).m + 1, '{}', Date.now(), uid);
       return toWidget(stmt.get.get(id));
     },
 
-    update(id, patch = {}) {
-      const cur = stmt.get.get(id);
-      if (!cur) throw httpError(404, '위젯을 찾을 수 없어요.');
+    update(id, patch = {}, uid) {
+      const cur = mine(id, uid);
       const fields = [];
       const values = [];
       const set = (col, val) => { fields.push(`${col} = ?`); values.push(val); };
@@ -96,8 +111,8 @@ export function createWidgetRepo(db) {
       return toWidget(stmt.get.get(id));
     },
 
-    remove(id) {
-      stmt.remove.run(id);
+    remove(id, uid) {
+      stmt.remove.run(id, uid);
     },
   };
 

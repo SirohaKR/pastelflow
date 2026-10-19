@@ -109,8 +109,8 @@ export function TrashDialog({ pages, onChanged, onClose }: { pages: PageMeta[]; 
 }
 
 export function SettingsDialog({
-  settings, onChange, onClose, canLogout,
-}: { settings: Settings; onChange: (s: Settings) => void; onClose: () => void; canLogout: boolean }) {
+  settings, onChange, onClose,
+}: { settings: Settings; onChange: (s: Settings) => void; onClose: () => void }) {
   const set = (patch: Partial<Settings>) => onChange({ ...settings, ...patch });
   return (
     <Modal onClose={onClose}>
@@ -146,44 +146,7 @@ export function SettingsDialog({
             ))}
           </div>
         </section>
-        {canLogout && (
-          <button
-            className="btn ghost"
-            onClick={async () => {
-              await api.logout();
-              location.reload();
-            }}
-          >
-            로그아웃
-          </button>
-        )}
       </div>
     </Modal>
-  );
-}
-
-export function Login({ onDone }: { onDone: () => void }) {
-  const [pw, setPw] = useState('');
-  const [err, setErr] = useState('');
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    try {
-      await api.login(pw);
-      onDone();
-    } catch (e) {
-      setErr((e as Error).message);
-    }
-  };
-  return (
-    <div className="login">
-      <form onSubmit={submit}>
-        <div className="brand-mark" style={{ justifyContent: 'center' }}><span /><span /><span /></div>
-        <h1>파스텔플로우</h1>
-        <p>비밀번호를 입력해 주세요</p>
-        <input className="field" type="password" autoFocus value={pw} onChange={(e) => setPw(e.target.value)} placeholder="비밀번호" />
-        {err && <div className="error">{err}</div>}
-        <button className="btn" style={{ justifyContent: 'center', padding: 11 }}>들어가기</button>
-      </form>
-    </div>
   );
 }

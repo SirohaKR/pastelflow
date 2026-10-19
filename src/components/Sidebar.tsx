@@ -1,7 +1,8 @@
 import { useState, type DragEvent } from 'react';
-import type { PageMeta } from '../api';
+import type { PageMeta, User } from '../api';
 import { childrenOf, displayTitle, dotColor, isInSubtree, type DropZone } from '../tree';
 import { Popover } from './Popover';
+import { Avatar } from './Account';
 
 type Props = {
   pages: PageMeta[];
@@ -9,7 +10,7 @@ type Props = {
   expanded: Set<string>;
   onToggle: (id: string, open?: boolean) => void;
   onOpen: (id: string) => void;
-  onCreate: (parentId: string | null, kind?: 'page' | 'database') => void;
+  onCreate: (parentId: string | null, kind?: 'page' | 'database', isPrivate?: boolean) => void;
   onMove: (id: string, target: PageMeta, zone: DropZone) => void;
   onFavorite: (id: string, favorite: boolean) => void;
   onTrash: (id: string) => void;
@@ -19,6 +20,11 @@ type Props = {
   onSettings: () => void;
   onCollapse: () => void;
   onHome: () => void;
+  me: User;
+  onProfile: () => void;
+  onMembers: () => void;
+  // 최상위 페이지를 공용 ↔ 내 페이지 구역으로 옮기기
+  onSetPrivate: (id: string, isPrivate: boolean) => void;
 };
 
 export function Sidebar(props: Props) {
@@ -26,6 +32,25 @@ export function Sidebar(props: Props) {
   const [dragId, setDragId] = useState<string | null>(null);
   const favorites = pages.filter((p) => p.favorite && p.deletedAt == null);
   const roots = childrenOf(pages, null);
+  const sharedRoots = roots.filter((p) => !p.private);
+  const privateRoots = roots.filter((p) => p.private);
+  const [overSection, setOverSection] = useState<'shared' | 'private' | null>(null);
+
+  // 구역 이름 위로 끌어 놓으면 그 구역 맨 위로 옮긴다
+  const sectionDrop = (isPrivate: boolean) => ({
+    onDragOver: (e: DragEvent) => {
+      if (!dragId) return;
+      e.preventDefault();
+      setOverSection(isPrivate ? 'private' : 'shared');
+    },
+    onDragLeave: () => setOverSection(null),
+    onDrop: (e: DragEvent) => {
+      e.preventDefault();
+      if (dragId) props.onSetPrivate(dragId, isPrivate);
+      setOverSection(null);
+      setDragId(null);
+    },
+  });
   const isMac = navigator.platform.toLowerCase().includes('mac');
 
   return (
@@ -56,12 +81,23 @@ export function Sidebar(props: Props) {
         )}
 
         <div className="side-section">
-          <div className="side-label">
-            <span>내 페이지</span>
-            <button className="icon-btn" style={{ width: 22, height: 22 }} title="새 페이지" onClick={() => onCreate(null)}>+</button>
+          <div className={`side-label ${overSection === 'shared' ? 'drop-on' : ''}`} {...sectionDrop(false)}>
+            <span title="모든 멤버가 함께 보고 고쳐요">👥 공용</span>
+            <button className="icon-btn" style={{ width: 22, height: 22 }} title="공용 페이지 추가" onClick={() => onCreate(null)}>+</button>
           </div>
-          {roots.length === 0 && <div className="side-empty">아직 페이지가 없어요.</div>}
-          {roots.map((p) => (
+          {sharedRoots.length === 0 && <div className="side-empty">함께 쓰는 페이지를 여기에 만들어요.</div>}
+          {sharedRoots.map((p) => (
+            <TreeNode key={p.id} page={p} depth={0} {...props} dragId={dragId} setDragId={setDragId} />
+          ))}
+        </div>
+
+        <div className="side-section">
+          <div className={`side-label ${overSection === 'private' ? 'drop-on' : ''}`} {...sectionDrop(true)}>
+            <span title="나만 볼 수 있어요">🔒 내 페이지</span>
+            <button className="icon-btn" style={{ width: 22, height: 22 }} title="내 페이지 추가" onClick={() => onCreate(null, 'page', true)}>+</button>
+          </div>
+          {privateRoots.length === 0 && <div className="side-empty">나만 보는 페이지를 여기에 만들어요.</div>}
+          {privateRoots.map((p) => (
             <TreeNode key={p.id} page={p} depth={0} {...props} dragId={dragId} setDragId={setDragId} />
           ))}
         </div>
@@ -70,6 +106,12 @@ export function Sidebar(props: Props) {
       <div className="side-bottom">
         <button className="side-action" onClick={props.onTrashOpen}>🗑️ 휴지통</button>
         <button className="side-action" onClick={props.onSettings}>🎨 테마 설정</button>
+        {props.me.role === 'admin' && <button className="side-action" onClick={props.onMembers}>👥 멤버 관리</button>}
+        <button className="side-me" onClick={props.onProfile} title="내 프로필">
+          <Avatar user={props.me} size={28} />
+          <b>{props.me.nickname}</b>
+          <small>⚙</small>
+        </button>
       </div>
     </aside>
   );
@@ -196,6 +238,16 @@ function TreeNode(props: NodeProps) {
                   🗃️ 하위 데이터베이스 추가
                 </button>
               </>
+            )}
+            {!page.parentId && !flat && (
+              <button
+                onClick={() => {
+                  props.onSetPrivate(page.id, !page.private);
+                  setMenuAnchor(null);
+                }}
+              >
+                {page.private ? '👥 공용으로 옮기기' : '🔒 내 페이지로 옮기기'}
+              </button>
             )}
             <button
               onClick={() => {

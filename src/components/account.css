@@ -1,0 +1,52 @@
+/* ── 계정 · 프로필 · 멤버 ───────────────────────────────── */
+.avatar {
+  --tag: var(--p1);
+  display: inline-grid; place-items: center; flex-shrink: 0; overflow: hidden;
+  border-radius: 50%; font-weight: 800; color: #2c2540;
+  background: color-mix(in srgb, var(--tag) 75%, var(--surface));
+}
+.avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.avatar.ring { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--tag); }
+
+.auth-form p { line-height: 1.6; }
+.auth-link { color: var(--accent-ink); font-size: 13px; text-decoration: none; }
+
+.profile-top { display: flex; align-items: center; gap: 16px; }
+.avatar-edit { position: relative; border: 0; background: transparent; padding: 0; border-radius: 50%; }
+.avatar-edit span {
+  position: absolute; right: -2px; bottom: -2px; width: 26px; height: 26px; border-radius: 50%;
+  display: grid; place-items: center; background: var(--surface); box-shadow: var(--shadow); font-size: 13px;
+}
+.profile-names { display: grid; gap: 6px; flex: 1; min-width: 0; }
+.profile-names .btn { justify-self: start; }
+.color-dot.big { width: 30px; height: 30px; }
+.pw-form { display: grid; gap: 6px; }
+.pw-form.full { grid-column: 1 / -1; grid-template-columns: 1fr auto; align-items: center; }
+.pw-form.full small { grid-column: 1 / -1; }
+.pw-form .btn { justify-self: start; }
+
+.member-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.member-list li {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px;
+  padding: 10px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface);
+}
+.member-list li.disabled { opacity: .55; }
+.member-name { display: grid; min-width: 0; }
+.member-name b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.member-list select.field { width: auto; }
+.member-actions { grid-column: 2 / -1; display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.invite-box { display: grid; gap: 10px; }
+.invite-box .btn { justify-self: start; }
+.invite-code { font-size: 12px; background: var(--sidebar); padding: 4px 8px; border-radius: 8px; }
+
+/* 사이드바 아래 내 프로필 */
+.side-me {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  border: 0; background: transparent; border-radius: 10px; padding: 7px 8px; text-align: left;
+}
+.side-me:hover { background: var(--hover); }
+.side-me b { font-size: 14px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-me small { color: var(--muted); font-size: 11px; }
+.side-label .lock { font-size: 11px; }
+
+.side-label.drop-on { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 8px; }

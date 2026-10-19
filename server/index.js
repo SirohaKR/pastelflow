@@ -3,48 +3,26 @@ import multer from 'multer';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { openDb, createRepo, httpError } from './db.js';
 import { createWidgetRepo } from './widgets.js';
+import { createUserRepo, publicUser } from './users.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.PORT || 5210);
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(ROOT, 'data'));
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
-const PASSWORD = process.env.APP_PASSWORD || '';
 const MAX_UPLOAD_MB = Number(process.env.MAX_UPLOAD_MB || 20);
 const COOKIE = 'pf_session';
-const SESSION_DAYS = 30;
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 const sqlite = openDb(DATA_DIR);
 const repo = createRepo(sqlite);
 const widgets = createWidgetRepo(sqlite);
+const users = createUserRepo(sqlite);
 
-let secret = repo.getSecret();
-if (!secret) {
-  secret = randomBytes(32).toString('hex');
-  repo.putSecret(secret);
-}
-
-// ── 로그인 (APP_PASSWORD 를 설정했을 때만) ────────────────────────────
-const sign = (value) => createHmac('sha256', secret).update(value).digest('hex');
-
-function makeToken() {
-  const exp = String(Date.now() + SESSION_DAYS * 86400_000);
-  return `${exp}.${sign(exp)}`;
-}
-
-function isValidToken(token) {
-  if (!token) return false;
-  const [exp, sig] = token.split('.');
-  if (!exp || !sig || Number(exp) < Date.now()) return false;
-  const a = Buffer.from(sig);
-  const b = Buffer.from(sign(exp));
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
-function readCookie(req, name) {
+// ── 로그인 세션 쿠키 ─────────────────────────────────────────────
+export function readCookie(req, name) {
   const header = req.headers.cookie || '';
   for (const part of header.split(';')) {
     const [k, ...v] = part.trim().split('=');
@@ -53,12 +31,23 @@ function readCookie(req, name) {
   return '';
 }
 
-const isAuthed = (req) => !PASSWORD || isValidToken(readCookie(req, COOKIE));
+const sessionToken = (req) => readCookie(req, COOKIE);
+export const userFromRequest = (req) => users.sessionUser(sessionToken(req));
 
-function passwordMatches(input) {
-  const a = Buffer.from(sign(String(input ?? '')));
-  const b = Buffer.from(sign(PASSWORD));
-  return timingSafeEqual(a, b);
+function setSession(req, res, userId) {
+  const token = users.createSession(userId);
+  const secure = req.secure ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${users.SESSION_DAYS * 86400}${secure}`);
+}
+
+// 아이디·IP 마다 10분에 10번까지
+const attempts = new Map();
+function limit(key) {
+  const now = Date.now();
+  const recent = (attempts.get(key) || []).filter((t) => now - t < 10 * 60_000);
+  if (recent.length >= 10) throw httpError(429, '시도가 너무 많아요. 10분 뒤에 다시 해 주세요.');
+  recent.push(now);
+  attempts.set(key, recent);
 }
 
 // ── 앱 ───────────────────────────────────────────────────────────────
@@ -68,35 +57,57 @@ app.set('trust proxy', true);
 app.use(express.json({ limit: '10mb' }));
 
 app.get('/api/auth/status', (req, res) => {
-  res.json({ required: !!PASSWORD, authed: isAuthed(req) });
+  res.json({ setup: users.count() === 0, user: publicUser(userFromRequest(req)) });
 });
 
-const loginAttempts = new Map();
+// 처음 한 번: 관리자 계정 만들기. 예전 데이터(위젯·화면 설정)는 이 사람에게 넘긴다
+app.post('/api/auth/setup', (req, res) => {
+  if (users.count() > 0) throw httpError(409, '이미 관리자 계정이 있어요.');
+  const u = users.create({ ...req.body, role: 'admin' });
+  widgets.claimLegacy(u.id);
+  repo.claimLegacySettings(u.id);
+  setSession(req, res, u.id);
+  res.status(201).json(publicUser(u));
+});
+
 app.post('/api/auth/login', (req, res) => {
-  const key = req.ip;
-  const now = Date.now();
-  const recent = (loginAttempts.get(key) || []).filter((t) => now - t < 10 * 60_000);
-  if (recent.length >= 10) return res.status(429).json({ error: '시도가 너무 많아요. 10분 뒤에 다시 해 주세요.' });
-  if (!PASSWORD || passwordMatches(req.body?.password)) {
-    loginAttempts.delete(key);
-    res.setHeader('Set-Cookie', `${COOKIE}=${makeToken()}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}`);
-    return res.json({ ok: true });
-  }
-  recent.push(now);
-  loginAttempts.set(key, recent);
-  res.status(401).json({ error: '비밀번호가 맞지 않아요.' });
+  limit(`ip:${req.ip}`);
+  const u = users.authenticate(req.body?.username, req.body?.password);
+  if (!u) throw httpError(401, '아이디나 비밀번호가 맞지 않아요.');
+  attempts.delete(`ip:${req.ip}`);
+  setSession(req, res, u.id);
+  res.json(publicUser(u));
 });
 
-app.post('/api/auth/logout', (_req, res) => {
+app.post('/api/auth/logout', (req, res) => {
+  users.endSession(sessionToken(req));
   res.setHeader('Set-Cookie', `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
   res.json({ ok: true });
 });
 
+// 초대 링크 확인과 가입 (로그인 전)
+app.get('/api/invites/:code', (req, res) => {
+  limit(`invite:${req.ip}`);
+  const by = users.checkInvite(req.params.code);
+  res.json({ ok: true, by: by?.nickname ?? '' });
+});
+
+app.post('/api/auth/register', (req, res) => {
+  limit(`invite:${req.ip}`);
+  const u = users.register(req.body || {});
+  setSession(req, res, u.id);
+  res.status(201).json(publicUser(u));
+});
+
 // 여기부터는 로그인 필요
 app.use(['/api', '/uploads'], (req, res, next) => {
-  if (isAuthed(req)) return next();
-  res.status(401).json({ error: '로그인이 필요해요.' });
+  const u = userFromRequest(req);
+  if (!u) return res.status(401).json({ error: '로그인이 필요해요.' });
+  req.user = u;
+  next();
 });
+
+const requireAdmin = (req, _res, next) => next(req.user.role === 'admin' ? undefined : httpError(403, '관리자만 할 수 있어요.'));
 
 // 올린 파일은 스크립트가 실행되지 않도록 격리해서 내려준다
 app.use('/uploads', express.static(UPLOAD_DIR, {
@@ -108,64 +119,90 @@ app.use('/uploads', express.static(UPLOAD_DIR, {
   },
 }));
 
-app.get('/api/pages', (_req, res) => res.json(repo.list()));
+// ── 나와 다른 사람들 ──
+app.get('/api/users', (_req, res) => res.json(users.list().filter((u) => !u.disabled)));
+app.patch('/api/me', (req, res) => res.json(publicUser(users.updateProfile(req.user.id, req.body || {}))));
+app.post('/api/me/password', (req, res) => {
+  users.changePassword(req.user.id, req.body?.current, req.body?.next);
+  // 다른 기기에서는 다시 로그인하게 하고, 지금 기기는 새 세션으로
+  users.endAllSessions(req.user.id);
+  setSession(req, res, req.user.id);
+  res.json({ ok: true });
+});
+
+// ── 관리자 ──
+app.get('/api/admin/users', requireAdmin, (_req, res) => res.json(users.list()));
+app.patch('/api/admin/users/:id', requireAdmin, (req, res) => res.json(publicUser(users.adminUpdate(req.user.id, req.params.id, req.body || {}))));
+app.get('/api/admin/invites', requireAdmin, (_req, res) => res.json(users.listInvites()));
+app.post('/api/admin/invites', requireAdmin, (req, res) => {
+  const inv = users.createInvite(req.user.id);
+  res.status(201).json({ code: inv.code, expiresAt: inv.expires_at });
+});
+app.delete('/api/admin/invites/:code', requireAdmin, (req, res) => {
+  users.deleteInvite(req.params.code);
+  res.json({ ok: true });
+});
+
+// ── 페이지 ──
+app.get('/api/pages', (req, res) => res.json(repo.list(req.user.id)));
 
 app.post('/api/pages', (req, res) => {
   const kind = req.body?.kind === 'database' ? 'database' : 'page';
-  res.status(201).json(repo.create({ parentId: req.body?.parentId || null, kind, title: req.body?.title || '' }));
+  const page = repo.create({ parentId: req.body?.parentId || null, kind, title: req.body?.title || '', private: req.body?.private === true }, req.user.id);
+  res.status(201).json(page);
 });
 
 // 데이터베이스와 그 안의 행 목록
-app.get('/api/databases/:id', (req, res) => res.json(repo.database(req.params.id)));
+app.get('/api/databases/:id', (req, res) => res.json(repo.database(req.params.id, req.user.id)));
 
 app.post('/api/databases/:id/rows', (req, res) => {
   const { title = '', props = {}, position } = req.body || {};
-  res.status(201).json(repo.create({ parentId: req.params.id, kind: 'row', title, props, position }));
+  res.status(201).json(repo.create({ parentId: req.params.id, kind: 'row', title, props, position }, req.user.id));
 });
 
-// 홈 위젯
-app.get('/api/widgets', (_req, res) => res.json(widgets.list()));
-app.post('/api/widgets', (req, res) => res.status(201).json(widgets.create(req.body || {})));
-app.patch('/api/widgets/:id', (req, res) => res.json(widgets.update(req.params.id, req.body || {})));
+// 홈 위젯 (사람마다 따로)
+app.get('/api/widgets', (req, res) => res.json(widgets.list(req.user.id)));
+app.post('/api/widgets', (req, res) => res.status(201).json(widgets.create(req.body || {}, req.user.id)));
+app.patch('/api/widgets/:id', (req, res) => res.json(widgets.update(req.params.id, req.body || {}, req.user.id)));
 app.delete('/api/widgets/:id', (req, res) => {
-  widgets.remove(req.params.id);
+  widgets.remove(req.params.id, req.user.id);
   res.json({ ok: true });
 });
 // 할 일·캘린더 위젯이 보는 모든 데이터베이스
-app.get('/api/agenda', (_req, res) => res.json(repo.allDatabases()));
+app.get('/api/agenda', (req, res) => res.json(repo.allDatabases(req.user.id)));
 
 app.get('/api/pages/:id', (req, res) => {
-  const page = repo.get(req.params.id);
+  const page = repo.get(req.params.id, req.user.id);
   if (!page) throw httpError(404, '페이지를 찾을 수 없습니다.');
   res.json(page);
 });
 
-app.patch('/api/pages/:id', (req, res) => res.json(repo.update(req.params.id, req.body || {})));
+app.patch('/api/pages/:id', (req, res) => res.json(repo.update(req.params.id, req.body || {}, req.user.id)));
 
-app.post('/api/pages/:id/duplicate', (req, res) => res.status(201).json(repo.duplicate(req.params.id)));
+app.post('/api/pages/:id/duplicate', (req, res) => res.status(201).json(repo.duplicate(req.params.id, req.user.id)));
 
 app.post('/api/pages/:id/trash', (req, res) => {
-  repo.trash(req.params.id);
+  repo.trash(req.params.id, req.user.id);
   res.json({ ok: true });
 });
 
 app.post('/api/pages/:id/restore', (req, res) => {
-  repo.restore(req.params.id);
+  repo.restore(req.params.id, req.user.id);
   res.json({ ok: true });
 });
 
 app.delete('/api/pages/:id', (req, res) => {
-  repo.destroy(req.params.id);
+  repo.destroy(req.params.id, req.user.id);
   res.json({ ok: true });
 });
 
-app.post('/api/trash/empty', (_req, res) => {
-  repo.emptyTrash();
+app.post('/api/trash/empty', (req, res) => {
+  repo.emptyTrash(req.user.id);
   res.json({ ok: true });
 });
 
-app.get('/api/settings', (_req, res) => res.json(repo.getSettings()));
-app.put('/api/settings', (req, res) => res.json(repo.putSettings(req.body || {})));
+app.get('/api/settings', (req, res) => res.json(repo.getSettings(req.user.id)));
+app.put('/api/settings', (req, res) => res.json(repo.putSettings(req.user.id, req.body || {})));
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -199,7 +236,10 @@ app.use((err, _req, res, _next) => {
   res.status(status).json({ error: status >= 500 ? '서버 오류가 났어요.' : message });
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`파스텔플로우 실행 중: http://localhost:${PORT} (데이터: ${DATA_DIR})`);
-  if (!PASSWORD) console.log('APP_PASSWORD 가 비어 있어 로그인 없이 열려 있어요.');
+  if (users.count() === 0) console.log('아직 계정이 없어요. 브라우저로 접속해서 관리자 계정을 만들어 주세요.');
+  if (process.env.APP_PASSWORD) console.log('APP_PASSWORD 는 0.5.0 부터 쓰지 않아요. 계정으로 로그인해 주세요.');
 });
+
+export { app, server, repo, users };

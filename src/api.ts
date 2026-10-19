@@ -9,6 +9,8 @@ export type PageMeta = {
   cover: string;
   position: number;
   favorite: boolean;
+  // 나만 보는 개인 페이지인지 (아니면 공용)
+  private: boolean;
   deletedAt: number | null;
   createdAt: number;
   updatedAt: number;
@@ -60,9 +62,22 @@ export type WidgetPatch = Partial<Pick<Widget, 'size' | 'color' | 'position' | '
 // 홈 위젯이 받는 데이터베이스 묶음
 export type AgendaDb = { id: string; title: string; icon: string; schema: Schema; rows: Row[] };
 
-export type PagePatch = Partial<Pick<Page, 'title' | 'icon' | 'cover' | 'content' | 'favorite' | 'position' | 'parentId' | 'schema'>> & {
+export type PagePatch = Partial<Pick<Page, 'title' | 'icon' | 'cover' | 'content' | 'favorite' | 'position' | 'parentId' | 'schema' | 'private'>> & {
   props?: Record<string, PropValue | null>;
 };
+
+export type User = {
+  id: string;
+  username: string;
+  nickname: string;
+  avatar: string;
+  color: TagColor;
+  role: 'admin' | 'member';
+  disabled: boolean;
+};
+
+export type AuthStatus = { setup: boolean; user: User | null };
+export type Invite = { code: string; createdBy: string; createdAt: number; expiresAt: number; usedBy: string | null; usedAt: number | null };
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -87,14 +102,27 @@ async function request<T>(method: string, url: string, body?: unknown, keepalive
 }
 
 export const api = {
-  authStatus: () => request<{ required: boolean; authed: boolean }>('GET', '/api/auth/status'),
-  login: (password: string) => request<{ ok: true }>('POST', '/api/auth/login', { password }),
+  authStatus: () => request<AuthStatus>('GET', '/api/auth/status'),
+  setup: (body: { username: string; password: string; nickname: string }) => request<User>('POST', '/api/auth/setup', body),
+  login: (username: string, password: string) => request<User>('POST', '/api/auth/login', { username, password }),
   logout: () => request<{ ok: true }>('POST', '/api/auth/logout'),
+  checkInvite: (code: string) => request<{ ok: true; by: string }>('GET', `/api/invites/${encodeURIComponent(code)}`),
+  register: (body: { code: string; username: string; password: string; nickname: string }) => request<User>('POST', '/api/auth/register', body),
+
+  users: () => request<User[]>('GET', '/api/users'),
+  updateMe: (patch: Partial<Pick<User, 'nickname' | 'avatar' | 'color'>>) => request<User>('PATCH', '/api/me', patch),
+  changePassword: (current: string, next: string) => request<{ ok: true }>('POST', '/api/me/password', { current, next }),
+  adminUsers: () => request<User[]>('GET', '/api/admin/users'),
+  adminUpdateUser: (id: string, patch: { role?: User['role']; disabled?: boolean; password?: string }) =>
+    request<User>('PATCH', `/api/admin/users/${id}`, patch),
+  invites: () => request<Invite[]>('GET', '/api/admin/invites'),
+  createInvite: () => request<{ code: string; expiresAt: number }>('POST', '/api/admin/invites'),
+  deleteInvite: (code: string) => request('DELETE', `/api/admin/invites/${encodeURIComponent(code)}`),
 
   listPages: () => request<PageMeta[]>('GET', '/api/pages'),
   getPage: (id: string) => request<Page>('GET', `/api/pages/${id}`),
-  createPage: (parentId: string | null = null, kind: 'page' | 'database' = 'page') =>
-    request<Page>('POST', '/api/pages', { parentId, kind }),
+  createPage: (parentId: string | null = null, kind: 'page' | 'database' = 'page', isPrivate = false) =>
+    request<Page>('POST', '/api/pages', { parentId, kind, private: isPrivate }),
   updatePage: (id: string, patch: PagePatch, keepalive = false) =>
     request<Page>('PATCH', `/api/pages/${id}`, patch, keepalive),
   duplicatePage: (id: string) => request<Page>('POST', `/api/pages/${id}/duplicate`),
