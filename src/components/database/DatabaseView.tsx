@@ -24,6 +24,7 @@ export type DbOps = {
   updateProperty: (id: string, patch: Partial<Property>) => void;
   changeType: (id: string, type: PropType) => void;
   deleteProperty: (id: string) => void;
+  readOnly?: boolean;
 };
 
 type Props_ = {
@@ -226,6 +227,7 @@ export function DatabaseView({ dbId, dark, dataVersion, onSaveState, onError, on
       schema, rows: visibleRows, openRow: setPeekId,
       updateRow: denied, addRow: async () => { denied(); return undefined; }, saveSchema: denied, setOptions: denied,
       addProperty: (type) => { denied(); return { id: '', name: '', type }; }, updateProperty: denied, changeType: denied, deleteProperty: denied,
+      readOnly: true,
     }
     : {
       schema, rows: visibleRows, updateRow, addRow, openRow: setPeekId, saveSchema, setOptions,

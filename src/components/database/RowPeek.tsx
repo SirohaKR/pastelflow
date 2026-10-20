@@ -147,6 +147,8 @@ export function RowPeek({ row, ops, dark, onLocalChange, onClose, onDelete, onSa
                       value={row.props[p.id]}
                       onChange={(v) => ops.updateRow(row.id, { props: { [p.id]: v } })}
                       onOptionsChange={(o) => ops.setOptions(p.id, o)}
+                      large
+                      readOnly={!canEdit}
                     />
                   </div>
                 </div>

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Property, PropType, PropValue, SelectOption, TagColor } from '../../api';
 import { findOption, formatDate, formatNumber, newId, nextColor, PROP_TYPES, TAG_COLORS, typeIcon } from '../../database';
 import { Popover } from '../Popover';
+import { asFiles, FileCell, FilePreview } from './FileCell';
 
 export const Tag = ({ option, onRemove }: { option: SelectOption; onRemove?: () => void }) => (
   <span className={`tag tag-${option.color}`}>
@@ -14,6 +15,8 @@ export const Tag = ({ option, onRemove }: { option: SelectOption; onRemove?: () 
 
 // 표 칸, 칸반 카드, 행 페이지에서 쓰는 속성 값 미리보기 (읽기 전용)
 export function PropPreview({ prop, value }: { prop: Property; value: PropValue | undefined }) {
+  if (prop.type === 'file') return <FilePreview files={asFiles(value)} />;
+  if (Array.isArray(value)) return null;
   if (prop.type === 'select') {
     const opt = findOption(prop, value);
     return opt ? <Tag option={opt} /> : null;
@@ -29,13 +32,19 @@ type EditorProps = {
   value: PropValue | undefined;
   onChange: (v: PropValue | null) => void;
   onOptionsChange: (options: SelectOption[]) => void;
+  // 항목 패널처럼 넓은 곳 (파일을 크게 보여 줌)
+  large?: boolean;
+  readOnly?: boolean;
 };
 
 // 속성 값을 바로 고치는 칸. 텍스트·숫자는 칸을 벗어나거나 Enter 를 누르면 저장.
-export function PropEditor({ prop, value, onChange, onOptionsChange }: EditorProps) {
-  const [draft, setDraft] = useState(value == null ? '' : String(value));
+export function PropEditor({ prop, value, onChange, onOptionsChange, large = false, readOnly = false }: EditorProps) {
+  const text = value == null || Array.isArray(value) ? '' : String(value);
+  const [draft, setDraft] = useState(text);
   const [selectAnchor, setSelectAnchor] = useState<HTMLElement | null>(null);
-  useEffect(() => setDraft(value == null ? '' : String(value)), [value]);
+  useEffect(() => setDraft(text), [text]);
+
+  if (prop.type === 'file') return <FileCell value={value} onChange={onChange} large={large} readOnly={readOnly} />;
 
   if (prop.type === 'checkbox') {
     return (
@@ -86,10 +95,10 @@ export function PropEditor({ prop, value, onChange, onOptionsChange }: EditorPro
       if (!t) return onChange(null);
       const n = Number(t);
       if (Number.isFinite(n)) onChange(n);
-      else setDraft(value == null ? '' : String(value));
+      else setDraft(text);
       return;
     }
-    if (draft !== (value ?? '')) onChange(draft || null);
+    if (draft !== text) onChange(draft || null);
   };
 
   return (
@@ -103,7 +112,7 @@ export function PropEditor({ prop, value, onChange, onOptionsChange }: EditorPro
       onKeyDown={(e) => {
         if (e.key === 'Enter' && !e.nativeEvent.isComposing) (e.target as HTMLInputElement).blur();
         if (e.key === 'Escape') {
-          setDraft(value == null ? '' : String(value));
+          setDraft(text);
           (e.target as HTMLInputElement).blur();
         }
       }}

@@ -26,7 +26,7 @@ export type PageMeta = {
   updatedAt: number;
 };
 
-export type PropType = 'text' | 'select' | 'date' | 'checkbox' | 'number';
+export type PropType = 'text' | 'select' | 'date' | 'checkbox' | 'number' | 'file';
 export type TagColor = 'p1' | 'p2' | 'p3' | 'p4' | 'p5' | 'p6';
 export type SelectOption = { id: string; name: string; color: TagColor };
 export type Property = { id: string; name: string; type: PropType; options?: SelectOption[] };
@@ -39,7 +39,9 @@ export type Schema = {
 };
 
 // 속성 값: 텍스트·선택(옵션 id)·날짜(YYYY-MM-DD)는 문자열, 숫자, 체크박스는 참/거짓
-export type PropValue = string | number | boolean;
+// 파일·이미지 속성 값의 한 칸
+export type FileItem = { url: string; name: string; mime?: string; size?: number };
+export type PropValue = string | number | boolean | FileItem[];
 export type Props = Record<string, PropValue>;
 
 export type Page = PageMeta & { content: unknown[]; schema?: Schema; props?: Props };
@@ -188,6 +190,6 @@ export const api = {
   async upload(file: File) {
     const form = new FormData();
     form.append('file', file);
-    return request<{ url: string; name: string }>('POST', '/api/uploads', form);
+    return request<{ url: string; name: string; mime: string; size: number }>('POST', '/api/uploads', form);
   },
 };

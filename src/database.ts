@@ -15,6 +15,7 @@ export const PROP_TYPES: { type: PropType; label: string; icon: string }[] = [
   { type: 'date', label: '날짜', icon: '📅' },
   { type: 'checkbox', label: '체크박스', icon: '☑️' },
   { type: 'number', label: '숫자', icon: '#' },
+  { type: 'file', label: '파일·이미지', icon: '📎' },
 ];
 
 export const TAG_COLORS: { key: TagColor; label: string }[] = [
@@ -66,6 +67,7 @@ export function sortValue(row: Row, prop: Property | null): string | number {
   const v = row.props[prop.id];
   if (prop.type === 'number') return typeof v === 'number' ? v : Number.NEGATIVE_INFINITY;
   if (prop.type === 'checkbox') return v === true ? 1 : 0;
+  if (prop.type === 'file') return Array.isArray(v) ? v.length : 0;
   if (prop.type === 'select') {
     const idx = prop.options?.findIndex((o) => o.id === v) ?? -1;
     return idx < 0 ? 9999 : idx;
@@ -87,7 +89,8 @@ export const byPosition = (a: Row, b: Row) => a.position - b.position || a.creat
 export function convertValue(v: PropValue | undefined, from: Property, to: PropType, toOptions: SelectOption[]): PropValue | null {
   if (v === undefined) return null;
   let text = '';
-  if (from.type === 'select') text = findOption(from, v)?.name ?? '';
+  if (Array.isArray(v)) text = v.map((f) => f.name).join(', ');
+  else if (from.type === 'select') text = findOption(from, v)?.name ?? '';
   else if (typeof v === 'boolean') text = v ? '예' : '';
   else text = String(v);
   switch (to) {
@@ -99,6 +102,8 @@ export function convertValue(v: PropValue | undefined, from: Property, to: PropT
     case 'checkbox': return v === true || (typeof v === 'number' && v !== 0) || ['예', 'true', 'o', 'v'].includes(text.toLowerCase());
     case 'date': return isDateKey(text) ? text : null;
     case 'select': return toOptions.find((o) => o.name === text)?.id ?? null;
+    // 파일은 다른 값에서 만들 수 없다
+    case 'file': return null;
   }
 }
 

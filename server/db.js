@@ -104,7 +104,7 @@ export const VISIBLE_SQL = `(private_owner = ? OR (private_owner IS NULL AND (sp
 const ROW_COLUMNS = 'id, title, icon, props, position, created_at, updated_at';
 
 const KINDS = ['page', 'database', 'row'];
-const PROP_TYPES = ['text', 'select', 'date', 'checkbox', 'number'];
+const PROP_TYPES = ['text', 'select', 'date', 'checkbox', 'number', 'file'];
 const TAG_COLORS = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6'];
 
 const shortId = () => randomUUID().slice(0, 8);
@@ -175,6 +175,20 @@ function mergeProps(current, patch) {
     else if (typeof value === 'string') next[k] = value.slice(0, 2000);
     else if (typeof value === 'boolean') next[k] = value;
     else if (typeof value === 'number' && Number.isFinite(value)) next[k] = value;
+    else if (Array.isArray(value)) {
+      // 파일·이미지 속성: 이 서버에 올린 파일만, 20개까지
+      const files = value
+        .filter((f) => f && typeof f.url === 'string' && /^\/uploads\/[\w.-]+$/.test(f.url))
+        .slice(0, 20)
+        .map((f) => ({
+          url: f.url,
+          name: str(f.name, 200) || f.url.split('/').pop(),
+          mime: str(f.mime, 100),
+          size: typeof f.size === 'number' && Number.isFinite(f.size) ? f.size : 0,
+        }));
+      if (files.length) next[k] = files;
+      else delete next[k];
+    }
   }
   return next;
 }

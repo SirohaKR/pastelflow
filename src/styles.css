@@ -747,3 +747,38 @@ button { cursor: pointer; }
 @media (max-width: 760px) {
   .tl-settings { margin-left: 0; }
 }
+
+/* ── 파일·이미지 속성 ───────────────────────────────────── */
+.file-cell { display: flex; align-items: center; gap: 4px; flex-wrap: nowrap; overflow: hidden; min-height: 30px; padding: 2px 4px; border-radius: 8px; }
+.file-cell.large { flex-wrap: wrap; overflow: visible; gap: 8px; padding: 4px 0; }
+.file-cell.drop-over { box-shadow: inset 0 0 0 2px var(--accent); background: var(--accent-soft); }
+.file-item { position: relative; display: inline-flex; flex-shrink: 0; }
+.file-item a { display: inline-flex; color: var(--text); text-decoration: none; }
+.file-item img { width: 26px; height: 26px; object-fit: cover; border-radius: 6px; display: block; box-shadow: inset 0 0 0 1px var(--border); }
+.file-cell.large .file-item img { width: 120px; height: 90px; border-radius: 10px; }
+.file-chip {
+  display: inline-flex; align-items: center; gap: 4px; max-width: 160px; font-size: 12px;
+  padding: 3px 8px; border-radius: 8px; background: var(--sidebar);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.file-cell.large .file-chip { max-width: 260px; font-size: 13px; padding: 6px 10px; }
+.file-chip small { color: var(--muted); }
+.file-x {
+  position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; border-radius: 50%;
+  border: 0; font-size: 9px; background: var(--text); color: var(--bg); display: none; place-items: center; padding: 0;
+}
+.file-item:hover .file-x { display: grid; }
+.file-add {
+  border: 1px dashed var(--border); background: transparent; color: var(--muted);
+  border-radius: 8px; padding: 2px 8px; font-size: 12px; white-space: nowrap; flex-shrink: 0;
+}
+.file-add:hover { border-color: var(--accent); color: var(--accent-ink); }
+.file-cell.large .file-add { padding: 10px 14px; font-size: 13px; }
+.file-busy { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.file-error { color: var(--danger); font-size: 13px; }
+.file-preview { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.file-thumb { width: 28px; height: 28px; object-fit: cover; border-radius: 6px; }
+.file-more { font-size: 12px; color: var(--muted); }
+.card-cover { display: block; width: calc(100% + 24px); margin: -10px -12px 10px; height: 120px; object-fit: cover; border-radius: 12px 12px 0 0; }
+td.col-file { min-width: 170px; max-width: 320px; }
+.file-cell:not(.large) .file-x { top: -2px; right: -2px; width: 15px; height: 15px; }

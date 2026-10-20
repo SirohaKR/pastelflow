@@ -269,7 +269,9 @@ const upload = multer({
 
 app.post('/api/uploads', upload.single('file'), (req, res) => {
   if (!req.file) throw httpError(400, '파일이 없습니다.');
-  res.status(201).json({ url: `/uploads/${req.file.filename}`, name: req.file.originalname });
+  // multer 는 파일 이름을 latin1 로 읽으므로 한글 이름을 되살린다
+  const name = Buffer.from(req.file.originalname, 'latin1').toString('utf8');
+  res.status(201).json({ url: `/uploads/${req.file.filename}`, name, mime: req.file.mimetype, size: req.file.size });
 });
 
 app.use('/api', (_req, _res, next) => next(httpError(404, '없는 주소예요.')));

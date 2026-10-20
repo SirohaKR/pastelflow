@@ -2,6 +2,7 @@ import { useState, type DragEvent } from 'react';
 import type { Property, Row, SelectOption } from '../../api';
 import { between, byPosition, defaultBoardProp, findOption, newId, nextColor, rowTitle } from '../../database';
 import { PropPreview, Tag } from './Cells';
+import { asFiles, isImage } from './FileCell';
 import type { DbOps } from './DatabaseView';
 
 const NONE = '__none__';
@@ -154,6 +155,8 @@ function Card({ row, props, dragging, dropBefore, onOpen, onDragStart, onDragEnd
     const v = row.props[p.id];
     return v !== undefined && v !== false && v !== '';
   });
+  // 파일 속성의 첫 이미지를 카드 위에 크게
+  const cover = props.filter((p) => p.type === 'file').flatMap((p) => asFiles(row.props[p.id])).find(isImage);
   return (
     <div
       className={`card ${dragging ? 'dragging' : ''} ${dropBefore ? 'drop-before' : ''}`}
@@ -171,13 +174,14 @@ function Card({ row, props, dragging, dropBefore, onOpen, onDragStart, onDragEnd
       tabIndex={0}
       onKeyDown={(e) => e.key === 'Enter' && onOpen()}
     >
+      {cover && <img className="card-cover" src={cover.url} alt="" loading="lazy" />}
       <div className={`card-title ${row.title.trim() ? '' : 'untitled'}`}>
         {row.icon && <span className="row-icon">{row.icon}</span>}
         {rowTitle(row)}
       </div>
       {shown.length > 0 && (
         <div className="card-props">
-          {shown.map((p) => <PropPreview key={p.id} prop={p} value={row.props[p.id]} />)}
+          {shown.filter((p) => !(cover && p.type === 'file' && asFiles(row.props[p.id]).every(isImage))).map((p) => <PropPreview key={p.id} prop={p} value={row.props[p.id]} />)}
         </div>
       )}
     </div>

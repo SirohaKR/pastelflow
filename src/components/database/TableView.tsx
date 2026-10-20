@@ -115,6 +115,7 @@ function TableRow({ row, ops }: { row: Row; ops: DbOps }) {
             value={row.props[p.id]}
             onChange={(v) => ops.updateRow(row.id, { props: { [p.id]: v } })}
             onOptionsChange={(o) => ops.setOptions(p.id, o)}
+            readOnly={ops.readOnly}
           />
         </td>
       ))}
