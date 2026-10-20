@@ -8,6 +8,7 @@ import { openDb, createRepo, httpError } from './db.js';
 import { createWidgetRepo } from './widgets.js';
 import { createUserRepo, publicUser } from './users.js';
 import { setupRealtime } from './realtime.js';
+import { createSpaceRepo } from './spaces.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.PORT || 5210);
@@ -21,6 +22,7 @@ const sqlite = openDb(DATA_DIR);
 const repo = createRepo(sqlite);
 const widgets = createWidgetRepo(sqlite);
 const users = createUserRepo(sqlite);
+const spaces = createSpaceRepo(sqlite, users);
 
 // ── 로그인 세션 쿠키 ─────────────────────────────────────────────
 export function readCookie(req, name) {
@@ -110,7 +112,7 @@ app.use(['/api', '/uploads'], (req, res, next) => {
 
 // 페이지·데이터베이스를 바꾸면 다른 사람 화면에 알린다
 let realtime = null;
-app.use(['/api/pages', '/api/databases', '/api/trash'], (req, res, next) => {
+app.use(['/api/pages', '/api/databases', '/api/trash', '/api/spaces'], (req, res, next) => {
   if (req.method !== 'GET') {
     res.on('finish', () => {
       if (res.statusCode < 400) realtime?.broadcastChange(String(req.get('x-client-id') || ''));
@@ -155,12 +157,30 @@ app.delete('/api/admin/invites/:code', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+// ── 스페이스 ──
+app.get('/api/spaces', (req, res) => res.json(spaces.listMine(req.user.id)));
+app.post('/api/spaces', (req, res) => res.status(201).json(spaces.create(req.body || {}, req.user)));
+app.patch('/api/spaces/:id', (req, res) => res.json(spaces.update(req.params.id, req.body || {}, req.user)));
+app.put('/api/spaces/:id/members', (req, res) => res.json(spaces.setMembers(req.params.id, req.body?.members, req.user)));
+app.post('/api/spaces/:id/leave', (req, res) => {
+  spaces.leave(req.params.id, req.user);
+  res.json({ ok: true });
+});
+app.delete('/api/spaces/:id', (req, res) => {
+  spaces.remove(req.params.id, req.user);
+  res.json({ ok: true });
+});
+app.get('/api/admin/spaces', requireAdmin, (_req, res) => res.json(spaces.listAll()));
+
 // ── 페이지 ──
 app.get('/api/pages', (req, res) => res.json(repo.list(req.user.id)));
 
 app.post('/api/pages', (req, res) => {
   const kind = req.body?.kind === 'database' ? 'database' : 'page';
-  const page = repo.create({ parentId: req.body?.parentId || null, kind, title: req.body?.title || '', private: req.body?.private === true }, req.user.id);
+  const page = repo.create({
+    parentId: req.body?.parentId || null, kind, title: req.body?.title || '',
+    private: req.body?.private === true, spaceId: typeof req.body?.spaceId === 'string' ? req.body.spaceId : null,
+  }, req.user.id);
   res.status(201).json(page);
 });
 

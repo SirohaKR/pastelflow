@@ -38,7 +38,8 @@
 ### 함께 쓰기
 - 계정 로그인, 관리자가 만든 초대 링크로 가입
 - 프로필: 별명, 프로필 사진, 색
-- 공용 페이지와 나만 보는 개인 페이지
+- 페이지 자리 3가지: 전체 공용, 스페이스(멤버만 보는 채널형 구역), 나만 보는 개인 페이지
+- 누구나 스페이스를 만들고 스페이스 관리자가 멤버를 관리
 - 실시간 동시 편집 ([Yjs](https://yjs.dev/) + [Hocuspocus](https://tiptap.dev/docs/hocuspocus)), 다른 사람 커서와 이름표 표시
 - 같은 페이지를 보고 있는 사람 표시, 다른 사람의 변경 즉시 반영
 - 홈 위젯과 테마는 사람마다 따로
@@ -103,6 +104,7 @@ server/                Express 서버
   index.js             API, 로그인, 업로드, 정적 파일
   db.js                페이지·데이터베이스 저장소 (SQLite), 공용/개인 권한
   users.js             계정, 세션, 초대 링크
+  spaces.js            스페이스와 멤버
   realtime.js          동시 편집(/collab), 변경 알림·접속자(/events)
   widgets.js           홈 위젯 저장소 (사람마다)
 src/                   React + TypeScript 화면

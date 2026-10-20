@@ -35,10 +35,35 @@ export function openDb(dataDir) {
   // 0.5.0: 개인 페이지 주인 (NULL 이면 공용), 동시 편집 문서 상태
   if (!cols.has('private_owner')) db.exec('ALTER TABLE pages ADD COLUMN private_owner TEXT');
   if (!cols.has('ydoc')) db.exec('ALTER TABLE pages ADD COLUMN ydoc BLOB');
+  // 0.6.0: 스페이스 (멤버만 보는 공용 구역)
+  if (!cols.has('space_id')) db.exec('ALTER TABLE pages ADD COLUMN space_id TEXT');
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_pages_space ON pages(space_id);
+    CREATE TABLE IF NOT EXISTS spaces (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      icon TEXT NOT NULL DEFAULT '',
+      color TEXT NOT NULL DEFAULT 'p1',
+      position REAL NOT NULL DEFAULT 0,
+      created_by TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS space_members (
+      space_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'member',
+      PRIMARY KEY (space_id, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_space_members_user ON space_members(user_id);
+  `);
   return db;
 }
 
-const LIST_COLUMNS = 'id, parent_id, kind, title, icon, cover, position, favorite, deleted_at, created_at, updated_at, private_owner';
+const LIST_COLUMNS = 'id, parent_id, kind, title, icon, cover, position, favorite, deleted_at, created_at, updated_at, private_owner, space_id';
+
+// 볼 수 있는 페이지 조건 (uid 를 두 번 넘긴다): 내 개인 페이지이거나, 전체 공용이거나, 내가 멤버인 스페이스
+export const VISIBLE_SQL = `(private_owner = ? OR (private_owner IS NULL AND (space_id IS NULL
+  OR space_id IN (SELECT space_id FROM space_members WHERE user_id = ?))))`;
 const ROW_COLUMNS = 'id, title, icon, props, position, created_at, updated_at';
 
 const KINDS = ['page', 'database', 'row'];
@@ -141,6 +166,7 @@ function toPage(row, withContent = false) {
     position: row.position,
     favorite: !!row.favorite,
     private: row.private_owner != null,
+    spaceId: row.space_id ?? null,
     deletedAt: row.deleted_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -157,15 +183,16 @@ export function createRepo(db) {
   const stmt = {
     // 데이터베이스 행은 사이드바에 보이지 않는다 (휴지통에 들어간 행만 함께 내려준다)
     list: db.prepare(`SELECT ${LIST_COLUMNS} FROM pages
-      WHERE (kind != 'row' OR deleted_at IS NOT NULL) AND (private_owner IS NULL OR private_owner = ?)
+      WHERE (kind != 'row' OR deleted_at IS NOT NULL) AND ${VISIBLE_SQL}
       ORDER BY position, created_at`),
     rows: db.prepare(`SELECT ${ROW_COLUMNS} FROM pages WHERE parent_id = ? AND kind = 'row' AND deleted_at IS NULL ORDER BY position, created_at`),
     get: db.prepare('SELECT * FROM pages WHERE id = ?'),
     children: db.prepare('SELECT id FROM pages WHERE parent_id = ?'),
     maxPos: db.prepare('SELECT COALESCE(MAX(position), 0) AS m FROM pages WHERE parent_id IS ?'),
-    insert: db.prepare(`INSERT INTO pages (id, parent_id, kind, title, icon, cover, content, props, schema, position, created_at, updated_at, private_owner)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-    setOwner: db.prepare('UPDATE pages SET private_owner = ? WHERE id = ?'),
+    insert: db.prepare(`INSERT INTO pages (id, parent_id, kind, title, icon, cover, content, props, schema, position, created_at, updated_at, private_owner, space_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+    setScope: db.prepare('UPDATE pages SET private_owner = ?, space_id = ? WHERE id = ?'),
+    isMember: db.prepare('SELECT role FROM space_members WHERE space_id = ? AND user_id = ?'),
     setDeleted: db.prepare('UPDATE pages SET deleted_at = ? WHERE id = ?'),
     remove: db.prepare('DELETE FROM pages WHERE id = ?'),
     count: db.prepare('SELECT COUNT(*) AS n FROM pages'),
@@ -186,7 +213,21 @@ export function createRepo(db) {
   }
 
   // 볼 수 있는 페이지인가 (공용이거나 내 개인 페이지)
-  const visible = (row, uid) => !!row && (row.private_owner == null || row.private_owner === uid);
+  const isMember = (spaceId, uid) => !!uid && !!stmt.isMember.get(spaceId, uid);
+  const visible = (row, uid) => {
+    if (!row) return false;
+    if (row.private_owner != null) return row.private_owner === uid;
+    return row.space_id == null || isMember(row.space_id, uid);
+  };
+  // 최상위에 놓을 자리(전체 공용 / 스페이스 / 내 페이지)
+  function rootScope({ private: isPrivate, spaceId }, uid) {
+    if (isPrivate) return { owner: uid, space: null };
+    if (spaceId) {
+      if (!isMember(spaceId, uid)) throw httpError(403, '그 스페이스의 멤버가 아니에요.');
+      return { owner: null, space: spaceId };
+    }
+    return { owner: null, space: null };
+  }
   function access(id, uid) {
     const row = stmt.get.get(id);
     if (!visible(row, uid)) throw httpError(404, '페이지를 찾을 수 없습니다.');
@@ -195,14 +236,14 @@ export function createRepo(db) {
   const view = (id) => toPage(stmt.get.get(id), true);
 
   const repo = {
-    list: (uid) => stmt.list.all(uid).map((r) => toPage(r)),
+    list: (uid) => stmt.list.all(uid, uid).map((r) => toPage(r)),
     get: (id, uid) => (visible(stmt.get.get(id), uid) ? view(id) : null),
     canAccess: (id, uid) => visible(stmt.get.get(id), uid),
     // 권한 확인 없이 (동시 편집 서버가 이미 확인한 뒤 쓴다)
     getRaw: (id) => view(id),
 
     // private: 최상위에 만들 때 개인 페이지로 만들지. 하위 페이지는 부모를 따른다
-    create({ parentId = null, kind = 'page', title = '', icon = '', cover = '', content = [], props = {}, position, private: isPrivate = false } = {}, uid = null) {
+    create({ parentId = null, kind = 'page', title = '', icon = '', cover = '', content = [], props = {}, position, private: isPrivate = false, spaceId = null } = {}, uid = null) {
       if (!KINDS.includes(kind)) throw httpError(400, '알 수 없는 페이지 종류예요.');
       const parent = parentId ? stmt.get.get(parentId) : null;
       if (parentId && !visible(parent, uid)) throw httpError(400, '상위 페이지가 없습니다.');
@@ -213,15 +254,15 @@ export function createRepo(db) {
       const pos = typeof position === 'number' && Number.isFinite(position) ? position : stmt.maxPos.get(parentId).m + 1;
       const schema = kind === 'database' ? JSON.stringify(defaultSchema()) : null;
       const rowProps = kind === 'row' ? JSON.stringify(mergeProps({}, props)) : '{}';
-      const owner = parent ? parent.private_owner : isPrivate && uid ? uid : null;
-      stmt.insert.run(id, parentId, kind, str(title, 300), icon, cover, JSON.stringify(content), rowProps, schema, pos, now, now, owner);
+      const scope = parent ? { owner: parent.private_owner, space: parent.space_id } : rootScope({ private: isPrivate && !!uid, spaceId }, uid);
+      stmt.insert.run(id, parentId, kind, str(title, 300), icon, cover, JSON.stringify(content), rowProps, schema, pos, now, now, scope.owner, scope.space);
       return view(id);
     },
 
     // 홈 위젯이 쓰는 모든 데이터베이스 (휴지통 제외)와 행
     allDatabases(uid) {
       const dbs = db.prepare(`SELECT * FROM pages WHERE kind = 'database' AND deleted_at IS NULL
-        AND (private_owner IS NULL OR private_owner = ?) ORDER BY position, created_at`).all(uid);
+        AND ${VISIBLE_SQL} ORDER BY position, created_at`).all(uid, uid);
       return dbs.map((row) => {
         const page = toPage(row, true);
         return { id: page.id, title: page.title, icon: page.icon, schema: page.schema, rows: stmt.rows.all(page.id).map(toRow) };
@@ -237,6 +278,9 @@ export function createRepo(db) {
     update(id, patch, uid) {
       const cur = access(id, uid);
       let owner = cur.private_owner;
+      let space = cur.space_id;
+      // 최상위로 옮길 때 자리를 정했는지 (private 또는 spaceId)
+      const placed = typeof patch.private === 'boolean' || 'spaceId' in patch;
       const fields = [];
       const values = [];
       const set = (col, val) => { fields.push(`${col} = ?`); values.push(val); };
@@ -268,19 +312,21 @@ export function createRepo(db) {
           if (parent.kind !== 'page') throw httpError(400, '데이터베이스 안으로는 옮길 수 없어요.');
           if (subtree(id).includes(parentId)) throw httpError(400, '자기 자신이나 하위 페이지 안으로는 옮길 수 없습니다.');
           owner = parent.private_owner;
-        } else if (typeof patch.private === 'boolean') {
-          owner = patch.private ? uid : null;
+          space = parent.space_id;
+        } else if (placed) {
+          ({ owner, space } = rootScope({ private: patch.private === true, spaceId: patch.spaceId || null }, uid));
         }
         set('parent_id', parentId);
-      } else if (typeof patch.private === 'boolean' && !cur.parent_id && cur.kind !== 'row') {
-        // 최상위 페이지를 공용 ↔ 내 페이지로 옮기기
-        owner = patch.private ? uid : null;
+      } else if (placed && !cur.parent_id && cur.kind !== 'row') {
+        // 최상위 페이지를 다른 자리(전체 공용 / 스페이스 / 내 페이지)로 옮기기
+        ({ owner, space } = rootScope({ private: patch.private === true, spaceId: patch.spaceId || null }, uid));
       }
-      if (owner !== cur.private_owner) {
+      const moved = owner !== cur.private_owner || space !== cur.space_id;
+      if (moved) {
         // 하위 페이지·데이터베이스 항목도 같이 옮긴다
-        for (const pid of subtree(id)) stmt.setOwner.run(owner, pid);
+        for (const pid of subtree(id)) stmt.setScope.run(owner, space, pid);
       }
-      if (!fields.length && owner === cur.private_owner) return view(id);
+      if (!fields.length && !moved) return view(id);
       set('updated_at', Date.now());
       db.prepare(`UPDATE pages SET ${fields.join(', ')} WHERE id = ?`).run(...values, id);
       return view(id);
@@ -299,7 +345,7 @@ export function createRepo(db) {
       const copy = (row, parentId, pos, title) => {
         if (++count > 5000) throw httpError(413, '복사할 페이지가 너무 많아요.');
         const newId = randomUUID();
-        stmt.insert.run(newId, parentId, row.kind, title, row.icon, row.cover, row.content, row.props, row.schema, pos, now, now, row.private_owner);
+        stmt.insert.run(newId, parentId, row.kind, title, row.icon, row.cover, row.content, row.props, row.schema, pos, now, now, row.private_owner, row.space_id);
         for (const child of kids.all(row.id)) copy(child, newId, child.position, child.title);
         return newId;
       };
@@ -346,7 +392,7 @@ export function createRepo(db) {
     },
 
     emptyTrash(uid) {
-      const trashed = db.prepare('SELECT id FROM pages WHERE deleted_at IS NOT NULL AND (private_owner IS NULL OR private_owner = ?)').all(uid);
+      const trashed = db.prepare(`SELECT id FROM pages WHERE deleted_at IS NOT NULL AND ${VISIBLE_SQL}`).all(uid, uid);
       for (const r of trashed) if (stmt.get.get(r.id)) repo.destroy(r.id, uid);
     },
 

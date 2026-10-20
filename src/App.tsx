@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, type AuthStatus, type Page, type PageMeta, type PagePatch, type User } from './api';
+import { api, type AuthStatus, type Page, type PageMeta, type PagePatch, type Scope, type Space, type User } from './api';
 import { applyTheme, cachedSettings, normalizeSettings, type Settings } from './theme';
 import { ancestors, displayTitle, dropTarget, isInSubtree, type DropZone } from './tree';
 import { Sidebar } from './components/Sidebar';
@@ -7,6 +7,7 @@ import { PageView, type SaveState } from './components/PageView';
 import { SearchDialog, SettingsDialog, TrashDialog } from './components/Dialogs';
 import { AuthScreen, Avatar, MembersDialog, ProfileDialog } from './components/Account';
 import { MeContext } from './session';
+import { SpaceDialog } from './components/SpaceDialog';
 import { useLive } from './useLive';
 import { Home } from './components/home/Home';
 import { WidgetPage } from './components/home/WidgetPage';
@@ -50,6 +51,10 @@ export default function App() {
   const [expanded, setExpanded] = useState(loadExpanded);
   const [sidebarOpen, setSidebarOpen] = useState(() => !isNarrow());
   const [dialog, setDialog] = useState<'search' | 'trash' | 'settings' | 'profile' | 'members' | null>(null);
+  const [spaces, setSpaces] = useState<Space[]>([]);
+  // 스페이스 만들기(space: null)·설정 창
+  const [spaceDialog, setSpaceDialog] = useState<{ space: Space | null } | null>(null);
+  const reloadSpaces = useCallback(() => api.spaces().then(setSpaces).catch(() => {}), []);
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [toast, setToast] = useState('');
   const [dataVersion, setDataVersion] = useState(0);
@@ -81,6 +86,7 @@ export default function App() {
   useEffect(() => {
     if (!authed) return;
     reloadPages().catch((e) => showError(e.message));
+    reloadSpaces();
     api.users().then(setUsers).catch(() => {});
     api.getSettings().then((raw) => {
       const s = normalizeSettings(raw);
@@ -95,9 +101,10 @@ export default function App() {
     window.clearTimeout(liveTimer.current);
     liveTimer.current = window.setTimeout(() => {
       reloadPages().catch(() => {});
+      reloadSpaces();
       api.users().then(setUsers).catch(() => {});
     }, 300);
-  }, [reloadPages]);
+  }, [reloadPages, reloadSpaces]);
   const viewers = useLive(authed, currentId, onRemoteChange);
 
   // ── 테마 ──
@@ -181,12 +188,12 @@ export default function App() {
 
   // 버튼을 빠르게 두 번 눌러도 페이지가 하나만 생기게
   const creating = useRef(false);
-  const create = async (parentId: string | null, kind: 'page' | 'database' = 'page', isPrivate = false) => {
+  const create = async (parentId: string | null, kind: 'page' | 'database' = 'page', scope: Scope = {}) => {
     if (creating.current) return;
     creating.current = true;
     try {
       (document.activeElement as HTMLElement | null)?.blur();
-      const p = await api.createPage(parentId, kind, isPrivate);
+      const p = await api.createPage(parentId, kind, scope);
       setPages((ps) => [...(ps || []), p]);
       setFreshId(p.id);
       // 새 페이지는 이미 내용을 알고 있으니 다시 불러오지 않고 바로 보여 준다
@@ -203,23 +210,30 @@ export default function App() {
     if (!pages) return;
     const dest: PagePatch = dropTarget(pages, target, zone, id);
     // 최상위로 놓으면 놓은 자리의 구역(공용/내 페이지)을 따른다
-    if (!dest.parentId) dest.private = target.private;
+    if (!dest.parentId) {
+      dest.private = target.private;
+      dest.spaceId = target.spaceId;
+    }
     patchMeta(id, dest);
     if (zone === 'inside') toggle(target.id, true);
     try {
       await api.updatePage(id, dest);
       // 구역이 바뀌면 하위 페이지도 함께 바뀌므로 다시 불러온다
-      if (pages.find((p) => p.id === id)?.private !== (dest.private ?? pages.find((p) => p.id === dest.parentId)?.private)) reloadPages();
+      const before = pages.find((p) => p.id === id);
+      const after = dest.parentId ? pages.find((p) => p.id === dest.parentId) : (dest as PageMeta);
+      if (before?.private !== after?.private || (before?.spaceId ?? null) !== (after?.spaceId ?? null)) reloadPages();
     } catch (e) {
       showError((e as Error).message);
       reloadPages();
     }
   };
 
-  const setPrivate = async (id: string, isPrivate: boolean) => {
-    patchMeta(id, { parentId: null, private: isPrivate });
+  // 다른 자리(전체 공용 / 스페이스 / 내 페이지)의 최상위로 옮기기
+  const moveTo = async (id: string, scope: Scope) => {
+    const patch: PagePatch = { parentId: null, private: !!scope.private, spaceId: scope.private ? null : scope.spaceId ?? null };
+    patchMeta(id, patch);
     try {
-      await api.updatePage(id, { parentId: null, private: isPrivate });
+      await api.updatePage(id, patch);
       await reloadPages();
     } catch (e) {
       showError((e as Error).message);
@@ -315,7 +329,19 @@ export default function App() {
         me={me}
         onProfile={() => setDialog('profile')}
         onMembers={() => setDialog('members')}
-        onSetPrivate={setPrivate}
+        spaces={spaces}
+        onMoveTo={moveTo}
+        onNewSpace={() => setSpaceDialog({ space: null })}
+        onSpaceSettings={(s) => setSpaceDialog({ space: s })}
+        onLeaveSpace={async (s) => {
+          if (!confirm(`'${s.name}' 스페이스에서 나갈까요? 안의 페이지가 더 이상 보이지 않아요.`)) return;
+          try {
+            await api.leaveSpace(s.id);
+            await Promise.all([reloadSpaces(), reloadPages()]);
+          } catch (e) {
+            showError((e as Error).message);
+          }
+        }}
       />
       {sidebarOpen && isNarrow() && <div className="scrim" onClick={() => setSidebarOpen(false)} />}
 
@@ -332,7 +358,9 @@ export default function App() {
               <span key={c.id} style={{ display: 'contents' }}>
                 {i > 0 && <span>/</span>}
                 <button className="crumb" onClick={() => open(c.id)}>
-                  {i === 0 && c.private && '🔒 '}{c.icon && `${c.icon} `}{displayTitle(c)}
+                  {i === 0 && c.private && '🔒 '}
+                  {i === 0 && c.spaceId && `${spaces.find((s) => s.id === c.spaceId)?.icon || '#'} ${spaces.find((s) => s.id === c.spaceId)?.name ?? ''} / `}
+                  {c.icon && `${c.icon} `}{displayTitle(c)}
                 </button>
               </span>
             ))}
@@ -390,6 +418,16 @@ export default function App() {
         <ProfileDialog me={me} onChange={(u) => setAuth({ setup: false, user: u })} onClose={() => setDialog(null)} onError={showError} />
       )}
       {dialog === 'members' && <MembersDialog me={me} onClose={() => setDialog(null)} onError={showError} />}
+      {spaceDialog && (
+        <SpaceDialog
+          space={spaceDialog.space}
+          me={me}
+          users={users}
+          onSaved={() => { reloadSpaces(); reloadPages(); }}
+          onClose={() => setSpaceDialog(null)}
+          onError={showError}
+        />
+      )}
       {toast && <div className="toast">{toast}</div>}
     </div>
     </MeContext.Provider>

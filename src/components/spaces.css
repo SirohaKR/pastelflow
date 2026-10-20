@@ -1,0 +1,39 @@
+/* ── 사이드바 구역 · 스페이스 ─────────────────────────────── */
+.side-label { gap: 4px; }
+.side-fold {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px;
+  border: 0; background: transparent; padding: 0; text-align: left;
+  font: inherit; color: inherit; font-weight: 600;
+}
+.side-fold:hover { color: var(--text); }
+.fold-arrow { font-size: 8px; color: var(--faint); transition: transform .15s; display: inline-block; }
+.fold-arrow.open { transform: rotate(90deg); }
+.side-label-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-label-tools { display: flex; gap: 1px; opacity: 0; transition: opacity .15s; }
+.side-label:hover .side-label-tools, .side-label-tools:focus-within { opacity: 1; }
+.side-label-tools .icon-btn { width: 22px; height: 22px; font-size: 13px; }
+@media (hover: none) { .side-label-tools { opacity: 1; } }
+
+/* 스페이스 이름 앞에 스페이스 색 막대 */
+.side-section.space > .side-label { position: relative; }
+.side-section.space > .side-label::before {
+  content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; border-radius: 3px; background: var(--tag);
+}
+
+.side-action.new-space { margin-top: 10px; color: var(--muted); font-size: 13px; width: 100%; }
+
+/* 스페이스 설정 창 */
+.space-top { display: flex; align-items: center; gap: 14px; }
+.space-icon {
+  --tag: var(--p1);
+  width: 64px; height: 64px; border-radius: 18px; border: 0; font-size: 30px; flex-shrink: 0;
+  background: color-mix(in srgb, var(--tag) 45%, var(--surface));
+}
+.space-icon:disabled { cursor: default; }
+.space-names { display: grid; gap: 8px; flex: 1; min-width: 0; }
+.member-list.compact li { grid-template-columns: minmax(0, 1fr) auto; padding: 6px 10px; }
+.member-list.compact li.off { opacity: .6; }
+.member-pick { display: flex; align-items: center; gap: 10px; min-width: 0; cursor: pointer; }
+.member-pick input { accent-color: var(--accent-ink); width: 16px; height: 16px; }
+.space-actions { display: flex; justify-content: space-between; gap: 8px; }
+.space-actions .btn:last-child { margin-left: auto; }
