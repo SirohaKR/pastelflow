@@ -116,7 +116,7 @@ app.use(['/api', '/uploads'], (req, res, next) => {
 
 // 페이지·데이터베이스를 바꾸면 다른 사람 화면에 알린다
 let realtime = null;
-app.use(['/api/pages', '/api/databases', '/api/trash', '/api/spaces', '/api/admin/users', '/api/me'], (req, res, next) => {
+app.use(['/api/pages', '/api/databases', '/api/trash', '/api/spaces', '/api/categories', '/api/admin/users', '/api/me'], (req, res, next) => {
   if (req.method !== 'GET') {
     res.on('finish', () => {
       if (res.statusCode < 400 && !res.locals.quiet) realtime?.broadcastChange(String(req.get('x-client-id') || ''));
@@ -176,6 +176,15 @@ app.delete('/api/spaces/:id', (req, res) => {
 });
 app.get('/api/admin/spaces', requireAdmin, (_req, res) => res.json(spaces.listAll()));
 
+// ── 카테고리 (구역마다 최상위 페이지 묶음) ──
+app.get('/api/categories', (req, res) => res.json(repo.listCategories(req.user.id)));
+app.post('/api/categories', (req, res) => res.status(201).json(repo.createCategory(req.body || {}, req.user.id)));
+app.patch('/api/categories/:id', (req, res) => res.json(repo.updateCategory(req.params.id, req.body || {}, req.user.id)));
+app.delete('/api/categories/:id', (req, res) => {
+  repo.removeCategory(req.params.id, req.user.id);
+  res.json({ ok: true });
+});
+
 // ── 페이지 ──
 app.get('/api/pages', (req, res) => res.json(repo.list(req.user.id)));
 
@@ -184,6 +193,7 @@ app.post('/api/pages', (req, res) => {
   const page = repo.create({
     parentId: req.body?.parentId || null, kind, title: req.body?.title || '',
     private: req.body?.private === true, spaceId: typeof req.body?.spaceId === 'string' ? req.body.spaceId : null,
+    categoryId: typeof req.body?.categoryId === 'string' ? req.body.categoryId : null,
   }, req.user.id);
   res.status(201).json(page);
 });

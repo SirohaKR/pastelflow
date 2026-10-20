@@ -39,6 +39,8 @@ export function openDb(dataDir) {
   if (!cols.has('space_id')) db.exec('ALTER TABLE pages ADD COLUMN space_id TEXT');
   // 0.7.0: 관리자만 편집 (하위 페이지에도 적용)
   if (!cols.has('locked')) db.exec('ALTER TABLE pages ADD COLUMN locked INTEGER NOT NULL DEFAULT 0');
+  // 0.8.0: 최상위 페이지가 들어 있는 카테고리
+  if (!cols.has('category_id')) db.exec('ALTER TABLE pages ADD COLUMN category_id TEXT');
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_pages_space ON pages(space_id);
     CREATE TABLE IF NOT EXISTS spaces (
@@ -65,12 +67,24 @@ export function openDb(dataDir) {
       PRIMARY KEY (user_id, page_id)
     );
     CREATE INDEX IF NOT EXISTS idx_favorites_page ON favorites(page_id);
+    -- 0.8.0: 구역(전체 공용 / 스페이스 / 내 페이지)마다 최상위 페이지를 묶는 카테고리
+    CREATE TABLE IF NOT EXISTS categories (
+      id TEXT PRIMARY KEY,
+      space_id TEXT,
+      private_owner TEXT,
+      name TEXT NOT NULL,
+      position REAL NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
   `);
+  // 0.8.0: 스페이스 아이콘 사진
+  const spaceCols = new Set(db.prepare('PRAGMA table_info(spaces)').all().map((c) => c.name));
+  if (!spaceCols.has('image')) db.exec("ALTER TABLE spaces ADD COLUMN image TEXT NOT NULL DEFAULT ''");
   return db;
 }
 
 // 즐겨찾기는 요청한 사람 기준 (uid 를 한 번 넘긴다)
-const LIST_COLUMNS = 'id, parent_id, kind, title, icon, cover, position, EXISTS (SELECT 1 FROM favorites f WHERE f.user_id = ? AND f.page_id = pages.id) AS favorite, deleted_at, created_at, updated_at, private_owner, space_id, locked';
+const LIST_COLUMNS = 'id, parent_id, kind, title, icon, cover, position, EXISTS (SELECT 1 FROM favorites f WHERE f.user_id = ? AND f.page_id = pages.id) AS favorite, deleted_at, created_at, updated_at, private_owner, space_id, locked, category_id';
 
 // 권한 단계: 보기 < 편집 < 편집·삭제 < 관리
 export const VIEW = 1;
@@ -191,6 +205,7 @@ function toPage(row, withContent = false) {
     private: row.private_owner != null,
     spaceId: row.space_id ?? null,
     locked: !!row.locked,
+    categoryId: row.category_id ?? null,
     deletedAt: row.deleted_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -223,6 +238,8 @@ export function createRepo(db) {
     isFav: db.prepare('SELECT 1 FROM favorites WHERE user_id = ? AND page_id = ?'),
     addFav: db.prepare('INSERT OR IGNORE INTO favorites (user_id, page_id, created_at) VALUES (?, ?, ?)'),
     removeFav: db.prepare('DELETE FROM favorites WHERE user_id = ? AND page_id = ?'),
+    getCat: db.prepare('SELECT * FROM categories WHERE id = ?'),
+    setCat: db.prepare('UPDATE pages SET category_id = ? WHERE id = ?'),
     getSetting: db.prepare('SELECT value FROM settings WHERE key = ?'),
     putSetting: db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'),
   };
@@ -284,6 +301,21 @@ export function createRepo(db) {
   function needScope(scope, uid, level) {
     if (scopeLevel(scope.owner, scope.space, uid) < level) throw httpError(403, DENIED[level]);
   }
+  // 그 자리에 있는 카테고리인지 확인한다 (없거나 다른 자리면 null)
+  function categoryIn(catId, owner, space) {
+    if (!catId) return null;
+    const c = stmt.getCat.get(catId);
+    return c && (c.private_owner ?? null) === (owner ?? null) && (c.space_id ?? null) === (space ?? null) ? c.id : null;
+  }
+  const toCategory = (c) => ({ id: c.id, name: c.name, position: c.position, private: c.private_owner != null, spaceId: c.space_id ?? null });
+  // 카테고리는 그 자리 관리자(개인 페이지는 주인)가 만들고 고친다
+  function needCategory(id, uid) {
+    const c = stmt.getCat.get(id);
+    if (!c || !visible(c, uid)) throw httpError(404, '카테고리를 찾을 수 없어요.');
+    needScope({ owner: c.private_owner, space: c.space_id }, uid, MANAGE);
+    return c;
+  }
+
   // 화면에 알려 줄 권한 정보
   const withAccess = (page, row, uid, base, locked) => ({ ...page, lockedAny: locked, access: levelFor(row, uid, base, locked) });
 
@@ -323,7 +355,7 @@ export function createRepo(db) {
     getRaw: (id) => view(id),
 
     // private: 최상위에 만들 때 개인 페이지로 만들지. 하위 페이지는 부모를 따른다
-    create({ parentId = null, kind = 'page', title = '', icon = '', cover = '', content = [], props = {}, position, private: isPrivate = false, spaceId = null } = {}, uid = null) {
+    create({ parentId = null, kind = 'page', title = '', icon = '', cover = '', content = [], props = {}, position, private: isPrivate = false, spaceId = null, categoryId = null } = {}, uid = null) {
       if (!KINDS.includes(kind)) throw httpError(400, '알 수 없는 페이지 종류예요.');
       const parent = parentId ? stmt.get.get(parentId) : null;
       if (parentId && !visible(parent, uid)) throw httpError(400, '상위 페이지가 없습니다.');
@@ -341,6 +373,8 @@ export function createRepo(db) {
         else needScope(scope, uid, EDIT);
       }
       stmt.insert.run(id, parentId, kind, str(title, 300), icon, cover, JSON.stringify(content), rowProps, schema, pos, now, now, scope.owner, scope.space);
+      const cat = parent ? null : categoryIn(categoryId, scope.owner, scope.space);
+      if (cat) stmt.setCat.run(cat, id);
       return viewFor(id, uid);
     },
 
@@ -424,6 +458,12 @@ export function createRepo(db) {
         needScope({ owner, space }, uid, EDIT);
       }
       const moved = owner !== cur.private_owner || space !== cur.space_id;
+      // 카테고리는 최상위 페이지만. 자리가 바뀌면 그 자리의 카테고리가 아닐 때 뺀다
+      const topLevel = cur.kind !== 'row' && !('parentId' in patch ? patch.parentId : cur.parent_id);
+      const wantCat = 'categoryId' in patch ? patch.categoryId || null : cur.category_id;
+      const cat = topLevel ? categoryIn(wantCat, owner, space) : null;
+      if (wantCat && 'categoryId' in patch && topLevel && !cat) throw httpError(400, '그 카테고리에는 넣을 수 없어요.');
+      if (cat !== (cur.category_id ?? null)) set('category_id', cat);
       if (moved) {
         // 하위 페이지·데이터베이스 항목도 같이 옮긴다
         for (const pid of subtree(id)) stmt.setScope.run(owner, space, pid);
@@ -458,6 +498,7 @@ export function createRepo(db) {
       try {
         const title = `${src.title.trim() || '제목 없음'} (사본)`.slice(0, 300);
         const newId = copy(src, src.parent_id, position, title);
+        if (!src.parent_id && src.category_id) stmt.setCat.run(src.category_id, newId);
         db.exec('COMMIT');
         return viewFor(newId, uid);
       } catch (err) {
@@ -504,6 +545,37 @@ export function createRepo(db) {
         const row = stmt.get.get(r.id);
         if (row && levelFor(row, uid) >= DELETE) repo.destroy(r.id, uid);
       }
+    },
+
+    // ── 카테고리 ──
+    listCategories(uid) {
+      return db.prepare(`SELECT * FROM categories WHERE ${VISIBLE_SQL} ORDER BY position, created_at`).all(uid, uid).map(toCategory);
+    },
+    createCategory({ name, private: isPrivate = false, spaceId = null } = {}, uid) {
+      const scope = rootScope({ private: isPrivate === true, spaceId: typeof spaceId === 'string' ? spaceId : null }, uid);
+      needScope(scope, uid, MANAGE);
+      const n = str(name, 60).trim();
+      if (!n) throw httpError(400, '카테고리 이름을 적어 주세요.');
+      const id = randomUUID();
+      const pos = db.prepare('SELECT COALESCE(MAX(position), 0) AS m FROM categories WHERE private_owner IS ? AND space_id IS ?').get(scope.owner, scope.space).m + 1;
+      db.prepare('INSERT INTO categories (id, space_id, private_owner, name, position, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(id, scope.space, scope.owner, n, pos, Date.now());
+      return toCategory(stmt.getCat.get(id));
+    },
+    updateCategory(id, patch = {}, uid) {
+      needCategory(id, uid);
+      if (typeof patch.name === 'string') {
+        const n = patch.name.slice(0, 60).trim();
+        if (!n) throw httpError(400, '카테고리 이름을 적어 주세요.');
+        db.prepare('UPDATE categories SET name = ? WHERE id = ?').run(n, id);
+      }
+      if (typeof patch.position === 'number' && Number.isFinite(patch.position)) db.prepare('UPDATE categories SET position = ? WHERE id = ?').run(patch.position, id);
+      return toCategory(stmt.getCat.get(id));
+    },
+    // 지우면 안의 페이지는 카테고리 없이 남는다
+    removeCategory(id, uid) {
+      needCategory(id, uid);
+      db.prepare('UPDATE pages SET category_id = NULL WHERE category_id = ?').run(id);
+      db.prepare('DELETE FROM categories WHERE id = ?').run(id);
     },
 
     // 화면 설정은 사람마다 따로 (예전 공용 설정은 첫 관리자에게 넘긴다)

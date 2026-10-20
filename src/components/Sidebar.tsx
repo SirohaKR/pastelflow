@@ -1,14 +1,20 @@
 import { useState, type DragEvent } from 'react';
-import type { PageMeta, Scope, Space, User } from '../api';
+import { api, type Category, type PageMeta, type Scope, type Space, type User } from '../api';
 import { childrenOf, displayTitle, dotColor, isInSubtree, type DropZone } from '../tree';
 import { Popover } from './Popover';
 import { Avatar } from './Account';
+import { SpaceIcon } from './SpaceHome';
 import './spaces.css';
 import { DELETE, EDIT, MANAGE, scopeLevel } from '../roles';
+import { inZone, zoneInfo, zoneScope, type ZoneKey } from '../zones';
 
 type Props = {
   pages: PageMeta[];
   spaces: Space[];
+  categories: Category[];
+  // 지금 사이드바에 보이는 구역
+  zone: ZoneKey;
+  onZone: (zone: ZoneKey) => void;
   currentId: string | null;
   expanded: Set<string>;
   onToggle: (id: string, open?: boolean) => void;
@@ -26,17 +32,16 @@ type Props = {
   me: User;
   onProfile: () => void;
   onMembers: () => void;
-  // 페이지를 다른 자리(전체 공용 / 스페이스 / 내 페이지)의 맨 위로 옮기기
+  // 페이지를 다른 자리(전체 공용 / 스페이스 / 내 페이지, 카테고리)의 최상위로 옮기기
   onMoveTo: (id: string, scope: Scope) => void;
   onNewSpace: () => void;
-  onSpaceSettings: (space: Space) => void;
-  onLeaveSpace: (space: Space) => void;
+  onSpaceHome: (id: string) => void;
+  // 카테고리를 바꾼 뒤 다시 불러오기
+  onCategoriesChanged: () => void;
+  onError: (msg: string) => void;
   // 관리자만 편집 잠금 켜고 끄기
   onLock: (id: string, locked: boolean) => void;
 };
-
-// 사이드바 구역 하나: 전체 공용, 스페이스들, 내 페이지
-type Section = { key: string; label: string; hint: string; scope: Scope; roots: PageMeta[]; space?: Space };
 
 const sameScope = (p: PageMeta, s: Scope) => (s.private ? p.private : !p.private && (p.spaceId ?? null) === (s.spaceId ?? null));
 
@@ -49,27 +54,24 @@ function loadFolded() {
 }
 
 export function Sidebar(props: Props) {
-  const { pages, spaces, onCreate } = props;
+  const { pages, spaces, categories, zone, onCreate, onError } = props;
   const [dragId, setDragId] = useState<string | null>(null);
-  const [overSection, setOverSection] = useState<string | null>(null);
+  const [overCat, setOverCat] = useState<string | null>(null);
   const [folded, setFolded] = useState(loadFolded);
-  const [spaceMenu, setSpaceMenu] = useState<{ anchor: HTMLElement; space: Space } | null>(null);
-  const favorites = pages.filter((p) => p.favorite && p.deletedAt == null);
-  const roots = childrenOf(pages, null);
+  const [zoneMenu, setZoneMenu] = useState<HTMLElement | null>(null);
+  const [catMenu, setCatMenu] = useState<{ anchor: HTMLElement; cat: Category } | null>(null);
+  // 이름을 고치는 카테고리 ('new' 면 새로 만들기)
+  const [naming, setNaming] = useState<{ id: string; name: string } | null>(null);
   const isMac = navigator.platform.toLowerCase().includes('mac');
-  const level = (scope: Scope) => scopeLevel(props.me, spaces, scope);
-  // 전체 공용에 만들 권한이 없으면 위쪽 '새 페이지'는 내 페이지에 만든다
-  const topScope: Scope = level({}) >= EDIT ? {} : { private: true };
+  const info = zoneInfo(zone, spaces);
+  const scope = zoneScope(zone);
+  const level = scopeLevel(props.me, spaces, scope);
 
-  const sections: Section[] = [
-    { key: 'shared', label: '👥 전체 공용', hint: '모든 멤버가 함께 보는 페이지를 여기에 만들어요.', scope: {}, roots: [] },
-    ...spaces.map((s) => ({
-      key: s.id, label: `${s.icon || '#'} ${s.name}`, hint: '이 스페이스 멤버만 보는 페이지를 만들어요.',
-      scope: { spaceId: s.id }, roots: [] as PageMeta[], space: s,
-    })),
-    { key: 'private', label: '🔒 내 페이지', hint: '나만 보는 페이지를 여기에 만들어요.', scope: { private: true }, roots: [] },
-  ];
-  for (const p of roots) sections.find((s) => sameScope(p, s.scope))?.roots.push(p);
+  // 이 구역의 페이지만: 즐겨찾기, 카테고리 없는 페이지, 카테고리별 페이지
+  const favorites = pages.filter((p) => p.favorite && p.deletedAt == null && inZone(p, zone));
+  const roots = childrenOf(pages, null).filter((p) => inZone(p, zone));
+  const cats = categories.filter((c) => inZone(c, zone)).sort((a, b) => a.position - b.position);
+  const loose = roots.filter((p) => !p.categoryId || !cats.some((c) => c.id === p.categoryId));
 
   const toggleFold = (key: string) => {
     setFolded((prev) => {
@@ -85,29 +87,84 @@ export function Sidebar(props: Props) {
     });
   };
 
-  // 구역 이름 위로 끌어 놓으면 그 구역 맨 위로 옮긴다
-  const sectionDrop = (s: Section) => ({
+  // 카테고리 이름 위로 끌어 놓으면 그 카테고리로 옮긴다
+  const catDrop = (c: Category) => ({
     onDragOver: (e: DragEvent) => {
-      if (!dragId || level(s.scope) < EDIT) return;
+      if (!dragId || level < EDIT) return;
       e.preventDefault();
-      setOverSection(s.key);
+      setOverCat(c.id);
     },
-    onDragLeave: () => setOverSection(null),
+    onDragLeave: () => setOverCat(null),
     onDrop: (e: DragEvent) => {
       e.preventDefault();
-      if (dragId) props.onMoveTo(dragId, s.scope);
-      setOverSection(null);
+      if (dragId) props.onMoveTo(dragId, { ...scope, categoryId: c.id });
+      setOverCat(null);
       setDragId(null);
     },
   });
 
-  const canManage = (s: Space) => s.myRole === 'owner' || props.me.role === 'admin';
+  const run = async (fn: () => Promise<unknown>) => {
+    try {
+      await fn();
+      props.onCategoriesChanged();
+    } catch (e) {
+      onError((e as Error).message);
+    }
+  };
+
+  const saveName = () => {
+    if (!naming) return;
+    const name = naming.name.trim();
+    setNaming(null);
+    if (!name) return;
+    if (naming.id === 'new') run(() => api.createCategory(name, scope));
+    else run(() => api.updateCategory(naming.id, { name }));
+  };
+
+  // 옆 카테고리와 자리 바꾸기
+  const shift = (c: Category, dir: -1 | 1) => {
+    const i = cats.findIndex((x) => x.id === c.id);
+    const other = cats[i + dir];
+    if (!other) return;
+    run(async () => {
+      await api.updateCategory(c.id, { position: other.position });
+      await api.updateCategory(other.id, { position: c.position });
+    });
+  };
+
+  const nameInput = (
+    <input
+      className="field small cat-input"
+      autoFocus
+      maxLength={60}
+      placeholder="카테고리 이름"
+      value={naming?.name ?? ''}
+      onChange={(e) => setNaming((n) => n && { ...n, name: e.target.value })}
+      onBlur={saveName}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') saveName();
+        if (e.key === 'Escape') setNaming(null);
+      }}
+    />
+  );
+
+  const tree = (p: PageMeta) => <TreeNode key={p.id} page={p} depth={0} {...props} dragId={dragId} setDragId={setDragId} />;
 
   return (
     <aside className="sidebar">
-      <div className="brand">
-        <div className="brand-mark"><span /><span /><span /></div>
-        <div className="brand-name">파스텔플로우</div>
+      <div className={`zone-head ${info.space ? `tag-${info.space.color}` : ''}`}>
+        <button className="zone-pick" onClick={(e) => setZoneMenu(e.currentTarget)} title="구역 바꾸기">
+          <span className="zone-switch"><span className="brand-mark"><span /><span /><span /></span></span>
+          <span className="zone-name">{info.name}</span>
+          <span className="zone-caret">▾</span>
+        </button>
+        {info.space ? (
+          <button className="zone-home" title="스페이스 홈" onClick={() => props.onSpaceHome(info.space!.id)}>
+            <SpaceIcon space={info.space} size={30} round />
+          </button>
+        ) : (
+          <span className="zone-home static" title={info.name}>{info.icon}</span>
+        )}
         <button className="icon-btn" title="사이드바 접기" onClick={props.onCollapse}>«</button>
       </div>
 
@@ -116,8 +173,12 @@ export function Sidebar(props: Props) {
         <button className="side-action" onClick={props.onSearch}>
           🔍 검색 <kbd>{isMac ? '⌘' : 'Ctrl'} K</kbd>
         </button>
-        <button className="side-action" onClick={() => onCreate(null, 'page', topScope)}>➕ 새 페이지</button>
-        <button className="side-action" onClick={() => onCreate(null, 'database', topScope)}>🗃️ 새 데이터베이스</button>
+        {level >= EDIT && (
+          <>
+            <button className="side-action" onClick={() => onCreate(null, 'page', scope)}>➕ 새 페이지</button>
+            <button className="side-action" onClick={() => onCreate(null, 'database', scope)}>🗃️ 새 데이터베이스</button>
+          </>
+        )}
       </div>
 
       <div className="side-scroll">
@@ -130,38 +191,50 @@ export function Sidebar(props: Props) {
           </div>
         )}
 
-        {sections.map((s) => {
-          const isFolded = folded.has(s.key);
+        <div className="side-section">
+          {level < EDIT && <div className="side-label"><span>페이지</span><span className="tree-lock" title="보기 전용">👁 보기 전용</span></div>}
+          {loose.map(tree)}
+          {roots.length === 0 && cats.length === 0 && (
+            <div className="side-empty">{level >= EDIT ? '아직 페이지가 없어요. 위의 ➕ 새 페이지로 만들어 보세요.' : '아직 페이지가 없어요.'}</div>
+          )}
+        </div>
+
+        {cats.map((c) => {
+          const isFolded = folded.has(`cat:${c.id}`);
+          const items = roots.filter((p) => p.categoryId === c.id);
           return (
-            <div key={s.key} className={`side-section ${s.space ? `space tag-${s.space.color}` : ''}`}>
-              <div className={`side-label ${overSection === s.key ? 'drop-on' : ''}`} {...sectionDrop(s)}>
-                <button className="side-fold" onClick={() => toggleFold(s.key)} title={isFolded ? '펼치기' : '접기'}>
-                  <span className={`fold-arrow ${isFolded ? '' : 'open'}`}>▶</span>
-                  <span className="side-label-text" title={s.space ? `${s.space.members.length}명` : s.hint}>{s.label}</span>
-                  {level(s.scope) < EDIT && <span className="tree-lock" title="보기 전용">👁</span>}
-                </button>
-                <span className="side-label-tools">
-                  {s.space && (
-                    <button className="icon-btn" title="스페이스 메뉴" onClick={(e) => setSpaceMenu({ anchor: e.currentTarget, space: s.space! })}>⋯</button>
-                  )}
-                  {level(s.scope) >= EDIT && (
-                    <button className="icon-btn" title="페이지 추가" onClick={() => onCreate(null, 'page', s.scope)}>+</button>
-                  )}
-                </span>
-              </div>
+            <div key={c.id} className="side-section">
+              {naming?.id === c.id ? nameInput : (
+                <div className={`side-label cat-label ${overCat === c.id ? 'drop-on' : ''}`} {...catDrop(c)}>
+                  <button className="side-fold" onClick={() => toggleFold(`cat:${c.id}`)} title={isFolded ? '펼치기' : '접기'}>
+                    <span className={`fold-arrow ${isFolded ? '' : 'open'}`}>▶</span>
+                    <span className="side-label-text">{c.name}</span>
+                  </button>
+                  <span className="side-label-tools">
+                    {level >= MANAGE && (
+                      <button className="icon-btn" title="카테고리 메뉴" onClick={(e) => setCatMenu({ anchor: e.currentTarget, cat: c })}>⋯</button>
+                    )}
+                    {level >= EDIT && (
+                      <button className="icon-btn" title="이 카테고리에 페이지 추가" onClick={() => onCreate(null, 'page', { ...scope, categoryId: c.id })}>+</button>
+                    )}
+                  </span>
+                </div>
+              )}
               {!isFolded && (
                 <>
-                  {s.roots.length === 0 && <div className="side-empty">{s.hint}</div>}
-                  {s.roots.map((p) => (
-                    <TreeNode key={p.id} page={p} depth={0} {...props} dragId={dragId} setDragId={setDragId} />
-                  ))}
+                  {items.length === 0 && <div className="side-empty">비어 있어요. 페이지를 여기로 끌어 놓을 수 있어요.</div>}
+                  {items.map(tree)}
                 </>
               )}
             </div>
           );
         })}
 
-        <button className="side-action new-space" onClick={props.onNewSpace}>＋ 스페이스 만들기</button>
+        {level >= MANAGE && (naming?.id === 'new' ? (
+          <div className="side-section">{nameInput}</div>
+        ) : (
+          <button className="side-action new-cat" onClick={() => setNaming({ id: 'new', name: '' })}>＋ 카테고리 만들기</button>
+        ))}
       </div>
 
       <div className="side-bottom">
@@ -175,19 +248,44 @@ export function Sidebar(props: Props) {
         </button>
       </div>
 
-      {spaceMenu && (
-        <Popover anchor={spaceMenu.anchor} onClose={() => setSpaceMenu(null)}>
-          <div className="menu">
-            {level({ spaceId: spaceMenu.space.id }) >= EDIT && (
-              <>
-                <button onClick={() => { onCreate(null, 'page', { spaceId: spaceMenu.space.id }); setSpaceMenu(null); }}>➕ 페이지 추가</button>
-                <button onClick={() => { onCreate(null, 'database', { spaceId: spaceMenu.space.id }); setSpaceMenu(null); }}>🗃️ 데이터베이스 추가</button>
-              </>
+      {zoneMenu && (
+        <Popover anchor={zoneMenu} onClose={() => setZoneMenu(null)}>
+          <div className="menu zone-menu">
+            {props.me.role !== 'view' && (
+              <button className="zone-new" onClick={() => { setZoneMenu(null); props.onNewSpace(); }}>＋ 스페이스 만들기</button>
             )}
-            <button onClick={() => { props.onSpaceSettings(spaceMenu.space); setSpaceMenu(null); }}>
-              {canManage(spaceMenu.space) ? '⚙ 스페이스 설정·멤버' : '👥 멤버 보기'}
+            <div className="menu-label">구역</div>
+            {[
+              { key: 'shared', icon: <span className="zone-emoji">👥</span>, name: '전체 공용' },
+              ...spaces.map((s) => ({ key: s.id, icon: <SpaceIcon space={s} size={22} round />, name: s.name })),
+              { key: 'private', icon: <span className="zone-emoji">🔒</span>, name: '내 페이지' },
+            ].map((z) => (
+              <button key={z.key} className={z.key === zone ? 'on' : ''} onClick={() => { setZoneMenu(null); props.onZone(z.key); }}>
+                {z.icon}
+                <span className="zone-item-name">{z.name}</span>
+                {z.key === zone && <span className="check">✓</span>}
+              </button>
+            ))}
+          </div>
+        </Popover>
+      )}
+
+      {catMenu && (
+        <Popover anchor={catMenu.anchor} onClose={() => setCatMenu(null)}>
+          <div className="menu">
+            <button onClick={() => { setNaming({ id: catMenu.cat.id, name: catMenu.cat.name }); setCatMenu(null); }}>✏️ 이름 바꾸기</button>
+            <button disabled={cats[0]?.id === catMenu.cat.id} onClick={() => { shift(catMenu.cat, -1); setCatMenu(null); }}>⬆ 위로</button>
+            <button disabled={cats[cats.length - 1]?.id === catMenu.cat.id} onClick={() => { shift(catMenu.cat, 1); setCatMenu(null); }}>⬇ 아래로</button>
+            <button
+              className="danger"
+              onClick={() => {
+                const c = catMenu.cat;
+                setCatMenu(null);
+                if (confirm(`'${c.name}' 카테고리를 지울까요?\n안의 페이지는 지워지지 않고 카테고리 밖으로 나와요.`)) run(() => api.deleteCategory(c.id));
+              }}
+            >
+              🗑️ 카테고리 지우기
             </button>
-            <button className="danger" onClick={() => { props.onLeaveSpace(spaceMenu.space); setSpaceMenu(null); }}>🚪 스페이스 나가기</button>
           </div>
         </Popover>
       )}
@@ -208,6 +306,10 @@ function TreeNode(props: NodeProps) {
   const [zone, setZone] = useState<DropZone | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [moveAnchor, setMoveAnchor] = useState<HTMLElement | null>(null);
+  const [catAnchor, setCatAnchor] = useState<HTMLElement | null>(null);
+  // 최상위 페이지는 같은 구역의 카테고리로 옮길 수 있다
+  const pageScope: Scope = page.private ? { private: true } : { spaceId: page.spaceId };
+  const zoneCats = page.parentId ? [] : props.categories.filter((c) => sameScope(page, c)).sort((a, b) => a.position - b.position);
   const kids = flat ? [] : childrenOf(pages, page.id);
   const open = expanded.has(page.id);
   // 데이터베이스는 하위 페이지 대신 행을 가진다
@@ -341,6 +443,16 @@ function TreeNode(props: NodeProps) {
                 📦 다른 곳으로 옮기기
               </button>
             )}
+            {canEdit && zoneCats.length > 0 && (
+              <button
+                onClick={() => {
+                  setCatAnchor(menuAnchor);
+                  setMenuAnchor(null);
+                }}
+              >
+                📁 카테고리 바꾸기
+              </button>
+            )}
             <button
               onClick={() => {
                 props.onDuplicate(page.id);
@@ -387,6 +499,27 @@ function TreeNode(props: NodeProps) {
                 }}
               >
                 {d.label}
+              </button>
+            ))}
+          </div>
+        </Popover>
+      )}
+
+      {catAnchor && (
+        <Popover anchor={catAnchor} onClose={() => setCatAnchor(null)}>
+          <div className="menu">
+            <div className="pop-head">어느 카테고리에 넣을까요?</div>
+            {[{ id: null as string | null, name: '카테고리 없음' }, ...zoneCats].map((c) => (
+              <button
+                key={c.id ?? 'none'}
+                className={(page.categoryId ?? null) === c.id ? 'on' : ''}
+                onClick={() => {
+                  props.onMoveTo(page.id, { ...pageScope, categoryId: c.id });
+                  setCatAnchor(null);
+                }}
+              >
+                {c.name}
+                {(page.categoryId ?? null) === c.id && <span className="check">✓</span>}
               </button>
             ))}
           </div>

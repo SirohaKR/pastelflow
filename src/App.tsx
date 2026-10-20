@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, type AuthStatus, type Page, type PageMeta, type PagePatch, type Scope, type Space, type User } from './api';
+import { api, type AuthStatus, type Category, type Page, type PageMeta, type PagePatch, type Scope, type Space, type User } from './api';
 import { applyTheme, cachedSettings, normalizeSettings, type Settings } from './theme';
 import { ancestors, displayTitle, dropTarget, isInSubtree, type DropZone } from './tree';
 import { Sidebar } from './components/Sidebar';
@@ -8,6 +8,8 @@ import { SearchDialog, SettingsDialog, TrashDialog } from './components/Dialogs'
 import { AuthScreen, Avatar, MembersDialog, ProfileDialog } from './components/Account';
 import { MeContext } from './session';
 import { SpaceDialog } from './components/SpaceDialog';
+import { SpaceHome, SpaceIcon, type SpaceDialogMode } from './components/SpaceHome';
+import { loadZone, saveZone, validZone, zoneOf, type ZoneKey } from './zones';
 import { useLive } from './useLive';
 import { Home } from './components/home/Home';
 import { WidgetPage } from './components/home/WidgetPage';
@@ -21,6 +23,11 @@ function idFromPath() {
 
 function widgetFromPath() {
   const m = location.pathname.match(/^\/w\/([\w-]+)/);
+  return m ? m[1] : null;
+}
+
+function spaceFromPath() {
+  const m = location.pathname.match(/^\/s\/([\w-]+)/);
   return m ? m[1] : null;
 }
 
@@ -46,6 +53,16 @@ export default function App() {
   const [currentId, setCurrentId] = useState<string | null>(idFromPath);
   // 홈 위젯 상세 페이지 (/w/위젯id)
   const [widgetId, setWidgetId] = useState<string | null>(widgetFromPath);
+  // 스페이스 홈 (/s/스페이스id)
+  const [spaceHomeId, setSpaceHomeId] = useState<string | null>(spaceFromPath);
+  // 사이드바에 보이는 구역 (전체 공용 / 스페이스 / 내 페이지)
+  const [zone, setZoneState] = useState<ZoneKey>(() => spaceFromPath() ?? loadZone());
+  const setZone = useCallback((z: ZoneKey) => {
+    setZoneState(z);
+    saveZone(z);
+  }, []);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const reloadCategories = useCallback(() => api.categories().then(setCategories).catch(() => {}), []);
   const [page, setPage] = useState<Page | null>(null);
   const [freshId, setFreshId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(loadExpanded);
@@ -53,7 +70,7 @@ export default function App() {
   const [dialog, setDialog] = useState<'search' | 'trash' | 'settings' | 'profile' | 'members' | null>(null);
   const [spaces, setSpaces] = useState<Space[]>([]);
   // 스페이스 만들기(space: null)·설정 창
-  const [spaceDialog, setSpaceDialog] = useState<{ space: Space | null } | null>(null);
+  const [spaceDialog, setSpaceDialog] = useState<{ space: Space | null; mode?: SpaceDialogMode } | null>(null);
   const reloadSpaces = useCallback(() => api.spaces().then(setSpaces).catch(() => {}), []);
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [toast, setToast] = useState('');
@@ -87,6 +104,7 @@ export default function App() {
     if (!authed) return;
     reloadPages().catch((e) => showError(e.message));
     reloadSpaces();
+    reloadCategories();
     api.users().then(setUsers).catch(() => {});
     api.getSettings().then((raw) => {
       const s = normalizeSettings(raw);
@@ -102,11 +120,12 @@ export default function App() {
     liveTimer.current = window.setTimeout(() => {
       reloadPages().catch(() => {});
       reloadSpaces();
+      reloadCategories();
       api.users().then(setUsers).catch(() => {});
       // 관리자가 내 역할을 바꿨을 수도 있으니 내 정보도 새로
       api.authStatus().then((s) => s.user && setAuth({ setup: false, user: s.user })).catch(() => {});
     }, 300);
-  }, [reloadPages, reloadSpaces]);
+  }, [reloadPages, reloadSpaces, reloadCategories]);
   const viewers = useLive(authed, currentId, onRemoteChange);
 
   // ── 테마 ──
@@ -127,6 +146,7 @@ export default function App() {
   const open = useCallback((id: string | null, replace = false) => {
     setCurrentId(id);
     setWidgetId(null);
+    setSpaceHomeId(null);
     const url = id ? `/p/${id}` : '/';
     if (location.pathname !== url) history[replace ? 'replaceState' : 'pushState'](null, '', url);
     if (isNarrow()) setSidebarOpen(false);
@@ -135,15 +155,27 @@ export default function App() {
   const openWidget = useCallback((id: string) => {
     setCurrentId(null);
     setWidgetId(id);
+    setSpaceHomeId(null);
     const url = `/w/${id}`;
     if (location.pathname !== url) history.pushState(null, '', url);
     if (isNarrow()) setSidebarOpen(false);
   }, []);
 
+  const openSpace = useCallback((id: string) => {
+    setCurrentId(null);
+    setWidgetId(null);
+    setSpaceHomeId(id);
+    setZone(id);
+    const url = '/s/' + id;
+    if (location.pathname !== url) history.pushState(null, '', url);
+    if (isNarrow()) setSidebarOpen(false);
+  }, [setZone]);
+
   useEffect(() => {
     const onPop = () => {
       setCurrentId(idFromPath());
       setWidgetId(widgetFromPath());
+      setSpaceHomeId(spaceFromPath());
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
@@ -154,6 +186,13 @@ export default function App() {
     if (!pages || !currentId) return;
     if (!pages.some((p) => p.id === currentId && p.deletedAt == null)) open(null, true);
   }, [pages, currentId, open]);
+
+  // 페이지를 열면 사이드바도 그 페이지의 구역으로
+  const currentMeta = pages?.find((p) => p.id === currentId);
+  const currentZone = currentMeta ? zoneOf(currentMeta) : null;
+  useEffect(() => {
+    if (currentZone) setZone(currentZone);
+  }, [currentId, currentZone, setZone]);
 
   useEffect(() => {
     if (!currentId || !authed) {
@@ -211,10 +250,11 @@ export default function App() {
   const move = async (id: string, target: PageMeta, zone: DropZone) => {
     if (!pages) return;
     const dest: PagePatch = dropTarget(pages, target, zone, id);
-    // 최상위로 놓으면 놓은 자리의 구역(공용/내 페이지)을 따른다
+    // 최상위로 놓으면 놓은 자리의 구역(공용/내 페이지)과 카테고리를 따른다
     if (!dest.parentId) {
       dest.private = target.private;
       dest.spaceId = target.spaceId;
+      dest.categoryId = target.categoryId;
     }
     patchMeta(id, dest);
     if (zone === 'inside') toggle(target.id, true);
@@ -232,7 +272,7 @@ export default function App() {
 
   // 다른 자리(전체 공용 / 스페이스 / 내 페이지)의 최상위로 옮기기
   const moveTo = async (id: string, scope: Scope) => {
-    const patch: PagePatch = { parentId: null, private: !!scope.private, spaceId: scope.private ? null : scope.spaceId ?? null };
+    const patch: PagePatch = { parentId: null, private: !!scope.private, spaceId: scope.private ? null : scope.spaceId ?? null, categoryId: scope.categoryId ?? null };
     patchMeta(id, patch);
     try {
       await api.updatePage(id, patch);
@@ -300,6 +340,30 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  const leaveSpace = async (s: Space) => {
+    if (!confirm(`'${s.name}' 스페이스에서 나갈까요? 안의 페이지가 더 이상 보이지 않아요.`)) return;
+    try {
+      await api.leaveSpace(s.id);
+      setZone('shared');
+      open(null, true);
+      await Promise.all([reloadSpaces(), reloadPages(), reloadCategories()]);
+    } catch (e) {
+      showError((e as Error).message);
+    }
+  };
+
+  const deleteSpace = async (s: Space) => {
+    if (!confirm(`'${s.name}' 스페이스를 지울까요?\n안의 페이지는 내 휴지통으로 옮겨져요. 되돌리면 '내 페이지'로 돌아와요.`)) return;
+    try {
+      await api.deleteSpace(s.id);
+      setZone('shared');
+      open(null, true);
+      await Promise.all([reloadSpaces(), reloadPages(), reloadCategories()]);
+    } catch (e) {
+      showError((e as Error).message);
+    }
+  };
+
   if (!auth) return <div className="empty-state">불러오는 중…</div>;
   if (!me) {
     const invite = inviteFromPath();
@@ -319,6 +383,9 @@ export default function App() {
     .filter((id) => id !== me.id)
     .map((id) => users.find((u) => u.id === id))
     .filter((u): u is User => !!u);
+  const spaceHome = spaceHomeId ? spaces.find((s) => s.id === spaceHomeId) ?? null : null;
+  // 스페이스 안 페이지면 경로 맨 앞에 스페이스 (누르면 스페이스 홈)
+  const crumbSpace = crumbs[0]?.spaceId ? spaces.find((s) => s.id === crumbs[0].spaceId) ?? null : null;
   const saveLabel = { saved: '저장됨', saving: '저장 중…', error: '저장 실패' }[saveState];
 
   return (
@@ -326,7 +393,10 @@ export default function App() {
     <div className={`app ${sidebarOpen ? '' : 'sidebar-closed'}`}>
       <Sidebar
         pages={pages}
-        currentId={currentId}
+        categories={categories}
+        zone={validZone(zone, spaces)}
+        onZone={setZone}
+        currentId={spaceHomeId ? '' : currentId}
         expanded={expanded}
         onToggle={toggle}
         onOpen={open}
@@ -347,16 +417,9 @@ export default function App() {
         onMoveTo={moveTo}
         onLock={lock}
         onNewSpace={() => setSpaceDialog({ space: null })}
-        onSpaceSettings={(s) => setSpaceDialog({ space: s })}
-        onLeaveSpace={async (s) => {
-          if (!confirm(`'${s.name}' 스페이스에서 나갈까요? 안의 페이지가 더 이상 보이지 않아요.`)) return;
-          try {
-            await api.leaveSpace(s.id);
-            await Promise.all([reloadSpaces(), reloadPages()]);
-          } catch (e) {
-            showError((e as Error).message);
-          }
-        }}
+        onSpaceHome={openSpace}
+        onCategoriesChanged={() => { reloadCategories(); reloadPages(); }}
+        onError={showError}
       />
       {sidebarOpen && isNarrow() && <div className="scrim" onClick={() => setSidebarOpen(false)} />}
 
@@ -366,15 +429,24 @@ export default function App() {
             <button className="icon-btn" title="사이드바 열기" onClick={() => setSidebarOpen(true)}>☰</button>
           )}
           <nav className="crumbs">
-            {!currentId && (widgetId
+            {spaceHome ? (
+              <span className="crumb crumb-space"><SpaceIcon space={spaceHome} size={18} round /> {spaceHome.name}</span>
+            ) : !currentId && (widgetId
               ? <button className="crumb" onClick={() => open(null)}>🏠 홈</button>
               : <span className="crumb">🏠 홈</span>)}
+            {crumbSpace && (
+              <>
+                <button className="crumb crumb-space" onClick={() => openSpace(crumbSpace.id)}>
+                  <SpaceIcon space={crumbSpace} size={18} round /> {crumbSpace.name}
+                </button>
+                <span>/</span>
+              </>
+            )}
             {crumbs.map((c, i) => (
               <span key={c.id} style={{ display: 'contents' }}>
                 {i > 0 && <span>/</span>}
                 <button className="crumb" onClick={() => open(c.id)}>
                   {i === 0 && c.private && '🔒 '}
-                  {i === 0 && c.spaceId && `${spaces.find((s) => s.id === c.spaceId)?.icon || '#'} ${spaces.find((s) => s.id === c.spaceId)?.name ?? ''} / `}
                   {c.icon && `${c.icon} `}{displayTitle(c)}
                 </button>
               </span>
@@ -415,6 +487,22 @@ export default function App() {
               meta={pages.find((p) => p.id === page.id)}
               onLock={lock}
             />
+          ) : spaceHomeId ? (
+            spaceHome ? (
+              <SpaceHome
+                space={spaceHome}
+                me={me}
+                users={users}
+                pages={pages}
+                categories={categories}
+                onOpen={open}
+                onDialog={(mode) => setSpaceDialog({ space: spaceHome, mode })}
+                onDelete={() => deleteSpace(spaceHome)}
+                onLeave={() => leaveSpace(spaceHome)}
+              />
+            ) : (
+              <div className="empty-state">스페이스를 찾을 수 없어요.</div>
+            )
           ) : !currentId ? (
             widgetId ? (
               <WidgetPage key={widgetId} id={widgetId} pages={pages} dataVersion={dataVersion} openPage={open} onBack={() => open(null)} onError={showError} />
@@ -437,9 +525,15 @@ export default function App() {
       {spaceDialog && (
         <SpaceDialog
           space={spaceDialog.space}
+          mode={spaceDialog.mode}
           me={me}
           users={users}
-          onSaved={() => { reloadSpaces(); reloadPages(); }}
+          onSaved={(s) => {
+            reloadSpaces();
+            reloadPages();
+            // 새로 만든 스페이스는 바로 그 스페이스 홈으로
+            if (!spaceDialog.space && s) openSpace(s.id);
+          }}
           onClose={() => setSpaceDialog(null)}
           onError={showError}
         />

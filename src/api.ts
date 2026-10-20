@@ -17,6 +17,8 @@ export type PageMeta = {
   // 이 페이지에 건 '관리자만 편집' / 위쪽 페이지까지 포함해 잠겼는지
   locked: boolean;
   lockedAny?: boolean;
+  // 최상위 페이지가 들어 있는 카테고리 (없으면 구역 맨 위)
+  categoryId: string | null;
   // 내 권한 단계: 1 보기, 2 편집, 3 편집·삭제, 4 관리
   access?: number;
   deletedAt: number | null;
@@ -70,7 +72,7 @@ export type WidgetPatch = Partial<Pick<Widget, 'size' | 'color' | 'position' | '
 // 홈 위젯이 받는 데이터베이스 묶음
 export type AgendaDb = { id: string; title: string; icon: string; schema: Schema; rows: Row[] };
 
-export type PagePatch = Partial<Pick<Page, 'title' | 'icon' | 'cover' | 'content' | 'favorite' | 'position' | 'parentId' | 'schema' | 'private' | 'spaceId' | 'locked'>> & {
+export type PagePatch = Partial<Pick<Page, 'title' | 'icon' | 'cover' | 'content' | 'favorite' | 'position' | 'parentId' | 'schema' | 'private' | 'spaceId' | 'locked' | 'categoryId'>> & {
   props?: Record<string, PropValue | null>;
 };
 
@@ -89,6 +91,8 @@ export type Space = {
   id: string;
   name: string;
   icon: string;
+  // 아이콘 사진 주소 (있으면 이모지 대신)
+  image: string;
   color: TagColor;
   position: number;
   createdBy: string;
@@ -97,7 +101,9 @@ export type Space = {
   members: SpaceMember[];
 };
 // 최상위 페이지가 놓이는 자리: 전체 공용 / 스페이스 / 내 페이지
-export type Scope = { private?: boolean; spaceId?: string | null };
+export type Scope = { private?: boolean; spaceId?: string | null; categoryId?: string | null };
+// 구역마다 최상위 페이지를 묶는 카테고리
+export type Category = { id: string; name: string; position: number; private: boolean; spaceId: string | null };
 
 export type AuthStatus = { setup: boolean; user: User | null };
 export type Invite = { code: string; createdBy: string; createdAt: number; expiresAt: number; usedBy: string | null; usedAt: number | null; role: User['role'] };
@@ -149,11 +155,15 @@ export const api = {
 
   spaces: () => request<Space[]>('GET', '/api/spaces'),
   adminSpaces: () => request<Space[]>('GET', '/api/admin/spaces'),
-  createSpace: (body: { name: string; icon: string; color: TagColor; members: SpaceMember[] }) => request<Space>('POST', '/api/spaces', body),
-  updateSpace: (id: string, patch: Partial<Pick<Space, 'name' | 'icon' | 'color' | 'position'>>) => request<Space>('PATCH', `/api/spaces/${id}`, patch),
+  createSpace: (body: { name: string; icon: string; image: string; color: TagColor; members: SpaceMember[] }) => request<Space>('POST', '/api/spaces', body),
+  updateSpace: (id: string, patch: Partial<Pick<Space, 'name' | 'icon' | 'image' | 'color' | 'position'>>) => request<Space>('PATCH', `/api/spaces/${id}`, patch),
   setSpaceMembers: (id: string, members: SpaceMember[]) => request<Space>('PUT', `/api/spaces/${id}/members`, { members }),
   leaveSpace: (id: string) => request('POST', `/api/spaces/${id}/leave`),
   deleteSpace: (id: string) => request('DELETE', `/api/spaces/${id}`),
+  categories: () => request<Category[]>('GET', '/api/categories'),
+  createCategory: (name: string, scope: Scope) => request<Category>('POST', '/api/categories', { name, private: !!scope.private, spaceId: scope.spaceId ?? null }),
+  updateCategory: (id: string, patch: Partial<Pick<Category, 'name' | 'position'>>) => request<Category>('PATCH', `/api/categories/${id}`, patch),
+  deleteCategory: (id: string) => request('DELETE', `/api/categories/${id}`),
   updatePage: (id: string, patch: PagePatch, keepalive = false) =>
     request<Page>('PATCH', `/api/pages/${id}`, patch, keepalive),
   duplicatePage: (id: string) => request<Page>('POST', `/api/pages/${id}/duplicate`),

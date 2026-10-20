@@ -18,7 +18,7 @@ export function createSpaceRepo(db, users) {
     members: db.prepare('SELECT user_id, role FROM space_members WHERE space_id = ?'),
     member: db.prepare('SELECT role FROM space_members WHERE space_id = ? AND user_id = ?'),
     maxPos: db.prepare('SELECT COALESCE(MAX(position), 0) AS m FROM spaces'),
-    insert: db.prepare('INSERT INTO spaces (id, name, icon, color, position, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'),
+    insert: db.prepare('INSERT INTO spaces (id, name, icon, image, color, position, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
     addMember: db.prepare('INSERT OR REPLACE INTO space_members (space_id, user_id, role) VALUES (?, ?, ?)'),
     clearMembers: db.prepare('DELETE FROM space_members WHERE space_id = ?'),
     removeMember: db.prepare('DELETE FROM space_members WHERE space_id = ? AND user_id = ?'),
@@ -29,6 +29,7 @@ export function createSpaceRepo(db, users) {
     id: row.id,
     name: row.name,
     icon: row.icon,
+    image: row.image ?? '',
     color: row.color,
     position: row.position,
     createdBy: row.created_by,
@@ -36,6 +37,9 @@ export function createSpaceRepo(db, users) {
     myRole: myRole ?? row.my_role ?? null,
     members: stmt.members.all(row.id).map((m) => ({ userId: m.user_id, role: m.role })),
   });
+
+  // 아이콘 사진은 올린 파일 주소만 받는다 (빈 값이면 이모지)
+  const cleanImage = (v) => (typeof v === 'string' && /^\/uploads\/[\w.-]+$/.test(v) ? v : '');
 
   const cleanName = (v) => {
     const n = String(v ?? '').trim().slice(0, 40);
@@ -76,14 +80,14 @@ export function createSpaceRepo(db, users) {
     listAll: () => stmt.all.all().map((r) => toSpace(r)),
     isMember: (spaceId, uid) => !!stmt.member.get(spaceId, uid),
 
-    create({ name, icon = '', color, members = [] } = {}, user) {
+    create({ name, icon = '', image = '', color, members = [] } = {}, user) {
       if (user.role === 'view') throw httpError(403, '보기 전용 계정은 스페이스를 만들 수 없어요.');
       const id = randomUUID();
       const map = cleanMembers(members, user.id);
       map.set(user.id, 'owner'); // 만든 사람은 관리자
       db.exec('BEGIN');
       try {
-        stmt.insert.run(id, cleanName(name), String(icon).slice(0, 16), COLORS.includes(color) ? color : 'p1', stmt.maxPos.get().m + 1, user.id, Date.now());
+        stmt.insert.run(id, cleanName(name), String(icon).slice(0, 16), cleanImage(image), COLORS.includes(color) ? color : 'p1', stmt.maxPos.get().m + 1, user.id, Date.now());
         for (const [uid, role] of map) stmt.addMember.run(id, uid, role);
         db.exec('COMMIT');
       } catch (err) {
@@ -99,6 +103,7 @@ export function createSpaceRepo(db, users) {
       const values = [];
       if (patch.name !== undefined) { fields.push('name = ?'); values.push(cleanName(patch.name)); }
       if (typeof patch.icon === 'string') { fields.push('icon = ?'); values.push(patch.icon.slice(0, 16)); }
+      if (typeof patch.image === 'string') { fields.push('image = ?'); values.push(cleanImage(patch.image)); }
       if (COLORS.includes(patch.color)) { fields.push('color = ?'); values.push(patch.color); }
       if (typeof patch.position === 'number' && Number.isFinite(patch.position)) { fields.push('position = ?'); values.push(patch.position); }
       if (fields.length) db.prepare(`UPDATE spaces SET ${fields.join(', ')} WHERE id = ?`).run(...values, id);
@@ -137,7 +142,8 @@ export function createSpaceRepo(db, users) {
       const now = Date.now();
       db.exec('BEGIN');
       try {
-        db.prepare('UPDATE pages SET space_id = NULL, private_owner = ?, deleted_at = COALESCE(deleted_at, ?) WHERE space_id = ?').run(user.id, now, id);
+        db.prepare('UPDATE pages SET space_id = NULL, private_owner = ?, category_id = NULL, deleted_at = COALESCE(deleted_at, ?) WHERE space_id = ?').run(user.id, now, id);
+        db.prepare('DELETE FROM categories WHERE space_id = ?').run(id);
         stmt.clearMembers.run(id);
         stmt.remove.run(id);
         db.exec('COMMIT');
