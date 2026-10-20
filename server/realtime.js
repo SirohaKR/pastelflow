@@ -2,6 +2,7 @@ import { Hocuspocus } from '@hocuspocus/server';
 import { ServerBlockNoteEditor } from '@blocknote/server-util';
 import { WebSocketServer } from 'ws';
 import * as Y from 'yjs';
+import { editorSchema } from './shared/editorSchema.js';
 
 // 실시간 기능
 //  /collab  : 문서 본문 동시 편집 (Yjs + Hocuspocus). 다른 사람 커서도 이 연결로 오간다
@@ -9,7 +10,8 @@ import * as Y from 'yjs';
 export const FRAGMENT = 'document-store';
 
 export function setupRealtime(server, { repo, userFromRequest }) {
-  const blocknote = ServerBlockNoteEditor.create();
+  // 화면과 같은 스키마여야 📎 첨부 같은 요소가 저장 중에 사라지지 않는다
+  const blocknote = ServerBlockNoteEditor.create({ schema: editorSchema });
   const wss = new WebSocketServer({ noServer: true, maxPayload: 20 * 1024 * 1024 });
 
   // ── 이벤트 채널 ──

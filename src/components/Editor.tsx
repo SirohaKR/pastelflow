@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react';
-import { useCreateBlockNote } from '@blocknote/react';
+import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
+import { getDefaultReactSlashMenuItems, SuggestionMenuController, useCreateBlockNote } from '@blocknote/react';
+import { filterSuggestionItems } from '@blocknote/core';
+import { TextSelection } from '@tiptap/pm/state';
 import { BlockNoteView } from '@blocknote/mantine';
 import { ko } from '@blocknote/core/locales';
 import { withCollaboration } from '@blocknote/core/yjs';
@@ -9,6 +11,7 @@ import '@blocknote/core/fonts/inter.css';
 import '@blocknote/mantine/style.css';
 import { api, type User } from '../api';
 import { CLIENT_ID, CURSOR_COLORS, useMe, wsUrl } from '../session';
+import { editorSchema } from '../../server/shared/editorSchema.js';
 
 const dictionary = {
   ...ko,
@@ -73,8 +76,11 @@ export function Editor({ pageId, dark, readOnly = false }: Props) {
 }
 
 function CollabEditor({ conn, dark, me, readOnly }: { conn: Conn; dark: boolean; me: User; readOnly: boolean }) {
+  const pickRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(0);
   const editor = useCreateBlockNote(
     withCollaboration({
+      schema: editorSchema,
       dictionary,
       uploadFile: async (file: File) => (await api.upload(file)).url,
       collaboration: {
@@ -87,9 +93,77 @@ function CollabEditor({ conn, dark, me, readOnly }: { conn: Conn; dark: boolean;
     [conn],
   );
 
+  // 파일을 올려서 지금 커서 자리에 📎 첨부로 넣는다 (표 칸 안에도 들어간다)
+  const insertFiles = async (files: File[]) => {
+    if (!files.length) return;
+    setUploading((n) => n + files.length);
+    for (const f of files) {
+      try {
+        const r = await api.upload(f);
+        editor.insertInlineContent([
+          { type: 'attachment', props: { url: r.url, name: r.name || f.name, mime: r.mime || f.type } },
+          ' ',
+        ]);
+      } catch (e) {
+        alert((e as Error).message);
+      }
+      setUploading((n) => n - 1);
+    }
+  };
+
+  const inTableCell = (el: EventTarget | Node | null) => {
+    const node = el instanceof Element ? el : (el as Node | null)?.parentElement;
+    return !!node?.closest?.('.bn-editor td, .bn-editor th');
+  };
+
+  // 표 칸에 파일을 끌어 놓으면 블록 대신 칸 안에 첨부로 넣는다
+  const onDropCapture = (e: DragEvent) => {
+    if (readOnly || !e.dataTransfer?.files.length || !inTableCell(e.target)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const view = editor.prosemirrorView;
+    const at = view?.posAtCoords({ left: e.clientX, top: e.clientY });
+    if (view && at) view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(at.pos))));
+    insertFiles([...e.dataTransfer.files]);
+  };
+
+  // 표 칸에서 파일을 붙여 넣어도 칸 안에 첨부로
+  const onPasteCapture = (e: ClipboardEvent) => {
+    if (readOnly || !e.clipboardData?.files.length || !inTableCell(window.getSelection()?.anchorNode ?? null)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    insertFiles([...e.clipboardData.files]);
+  };
+
   return (
-    <div className="editor-wrap">
-      <BlockNoteView editor={editor} theme={dark ? 'dark' : 'light'} editable={!readOnly} />
+    <div className="editor-wrap" onDropCapture={onDropCapture} onPasteCapture={onPasteCapture}>
+      <BlockNoteView editor={editor} theme={dark ? 'dark' : 'light'} editable={!readOnly} slashMenu={false}>
+        <SuggestionMenuController
+          triggerCharacter="/"
+          getItems={async (query) => filterSuggestionItems([
+            ...getDefaultReactSlashMenuItems(editor),
+            {
+              title: '파일 첨부 (줄 안에)',
+              subtext: '글자처럼 줄 안에 넣어요. 표 칸 안에도 들어가요',
+              aliases: ['첨부', '파일', 'attach', 'file', 'clip', 'ckqn'],
+              group: '기타',
+              icon: <span className="slash-icon">📎</span>,
+              onItemClick: () => pickRef.current?.click(),
+            },
+          ], query)}
+        />
+      </BlockNoteView>
+      {uploading > 0 && <div className="attach-busy">📎 올리는 중… {uploading}</div>}
+      <input
+        ref={pickRef}
+        type="file"
+        multiple
+        hidden
+        onChange={(e) => {
+          if (e.target.files) insertFiles([...e.target.files]);
+          e.target.value = '';
+        }}
+      />
     </div>
   );
 }
