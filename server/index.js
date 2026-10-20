@@ -23,6 +23,9 @@ const repo = createRepo(sqlite);
 const widgets = createWidgetRepo(sqlite);
 const users = createUserRepo(sqlite);
 const spaces = createSpaceRepo(sqlite, users);
+// 0.7.1: 예전 공용 즐겨찾기는 가장 먼저 만든 관리자에게 넘긴다
+const firstAdmin = sqlite.prepare("SELECT id FROM users WHERE role = 'admin' ORDER BY created_at LIMIT 1").get();
+if (firstAdmin) repo.claimLegacyFavorites(firstAdmin.id);
 
 // ── 로그인 세션 쿠키 ─────────────────────────────────────────────
 export function readCookie(req, name) {
@@ -69,6 +72,7 @@ app.post('/api/auth/setup', (req, res) => {
   const u = users.create({ ...req.body, role: 'admin' });
   widgets.claimLegacy(u.id);
   repo.claimLegacySettings(u.id);
+  repo.claimLegacyFavorites(u.id);
   setSession(req, res, u.id);
   res.status(201).json(publicUser(u));
 });
@@ -115,7 +119,7 @@ let realtime = null;
 app.use(['/api/pages', '/api/databases', '/api/trash', '/api/spaces', '/api/admin/users', '/api/me'], (req, res, next) => {
   if (req.method !== 'GET') {
     res.on('finish', () => {
-      if (res.statusCode < 400) realtime?.broadcastChange(String(req.get('x-client-id') || ''));
+      if (res.statusCode < 400 && !res.locals.quiet) realtime?.broadcastChange(String(req.get('x-client-id') || ''));
     });
   }
   next();
@@ -209,7 +213,13 @@ app.get('/api/pages/:id', (req, res) => {
   res.json(page);
 });
 
-app.patch('/api/pages/:id', (req, res) => res.json(repo.update(req.params.id, req.body || {}, req.user.id)));
+app.patch('/api/pages/:id', (req, res) => {
+  const body = req.body || {};
+  // 즐겨찾기만 바꾸면 내 것이라 다른 사람에게 알리지 않는다
+  const keys = Object.keys(body);
+  res.locals.quiet = keys.length > 0 && keys.every((k) => k === 'favorite');
+  res.json(repo.update(req.params.id, body, req.user.id));
+});
 
 app.post('/api/pages/:id/duplicate', (req, res) => res.status(201).json(repo.duplicate(req.params.id, req.user.id)));
 

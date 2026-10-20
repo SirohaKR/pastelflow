@@ -57,11 +57,20 @@ export function openDb(dataDir) {
       PRIMARY KEY (space_id, user_id)
     );
     CREATE INDEX IF NOT EXISTS idx_space_members_user ON space_members(user_id);
+    -- 0.7.1: 즐겨찾기는 사람마다 따로 (pages.favorite 는 예전 값을 옮기기 전까지만 쓴다)
+    CREATE TABLE IF NOT EXISTS favorites (
+      user_id TEXT NOT NULL,
+      page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (user_id, page_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_favorites_page ON favorites(page_id);
   `);
   return db;
 }
 
-const LIST_COLUMNS = 'id, parent_id, kind, title, icon, cover, position, favorite, deleted_at, created_at, updated_at, private_owner, space_id, locked';
+// 즐겨찾기는 요청한 사람 기준 (uid 를 한 번 넘긴다)
+const LIST_COLUMNS = 'id, parent_id, kind, title, icon, cover, position, EXISTS (SELECT 1 FROM favorites f WHERE f.user_id = ? AND f.page_id = pages.id) AS favorite, deleted_at, created_at, updated_at, private_owner, space_id, locked';
 
 // 권한 단계: 보기 < 편집 < 편집·삭제 < 관리
 export const VIEW = 1;
@@ -178,7 +187,7 @@ function toPage(row, withContent = false) {
     icon: row.icon,
     cover: row.cover,
     position: row.position,
-    favorite: !!row.favorite,
+    favorite: false,
     private: row.private_owner != null,
     spaceId: row.space_id ?? null,
     locked: !!row.locked,
@@ -211,6 +220,9 @@ export function createRepo(db) {
     setDeleted: db.prepare('UPDATE pages SET deleted_at = ? WHERE id = ?'),
     remove: db.prepare('DELETE FROM pages WHERE id = ?'),
     count: db.prepare('SELECT COUNT(*) AS n FROM pages'),
+    isFav: db.prepare('SELECT 1 FROM favorites WHERE user_id = ? AND page_id = ?'),
+    addFav: db.prepare('INSERT OR IGNORE INTO favorites (user_id, page_id, created_at) VALUES (?, ?, ?)'),
+    removeFav: db.prepare('DELETE FROM favorites WHERE user_id = ? AND page_id = ?'),
     getSetting: db.prepare('SELECT value FROM settings WHERE key = ?'),
     putSetting: db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'),
   };
@@ -283,19 +295,20 @@ export function createRepo(db) {
   const view = (id) => toPage(stmt.get.get(id), true);
   const viewFor = (id, uid) => {
     const row = stmt.get.get(id);
-    return withAccess(toPage(row, true), row, uid, scopeLevel(row.private_owner, row.space_id, uid), lockedChain(row));
+    const page = { ...toPage(row, true), favorite: !!uid && !!stmt.isFav.get(uid, id) };
+    return withAccess(page, row, uid, scopeLevel(row.private_owner, row.space_id, uid), lockedChain(row));
   };
 
   const repo = {
     list(uid) {
-      const rows = stmt.list.all(uid, uid);
+      const rows = stmt.list.all(uid, uid, uid);
       const byId = new Map(rows.map((r) => [r.id, r]));
       const get = (id) => byId.get(id) ?? stmt.get.get(id);
       const levels = new Map();
       return rows.map((r) => {
         const key = `${r.private_owner}|${r.space_id}`;
         if (!levels.has(key)) levels.set(key, scopeLevel(r.private_owner, r.space_id, uid));
-        return withAccess(toPage(r), r, uid, levels.get(key), lockedChain(r, get));
+        return withAccess({ ...toPage(r), favorite: !!r.favorite }, r, uid, levels.get(key), lockedChain(r, get));
       });
     },
     get: (id, uid) => (visible(stmt.get.get(id), uid) ? viewFor(id, uid) : null),
@@ -369,7 +382,11 @@ export function createRepo(db) {
         // 본문을 통째로 바꾸면 동시 편집 상태는 다음에 열 때 새로 만든다
         set('ydoc', null);
       }
-      if (typeof patch.favorite === 'boolean') set('favorite', patch.favorite ? 1 : 0);
+      // 즐겨찾기는 내 목록에만 넣고 뺀다 (페이지 수정 시각은 그대로)
+      if (typeof patch.favorite === 'boolean') {
+        if (patch.favorite) stmt.addFav.run(uid, id, Date.now());
+        else stmt.removeFav.run(uid, id);
+      }
       if (typeof patch.locked === 'boolean') {
         if (scopeLevel(cur.private_owner, cur.space_id, uid) < MANAGE) throw httpError(403, DENIED[MANAGE]);
         set('locked', patch.locked ? 1 : 0);
@@ -501,6 +518,11 @@ export function createRepo(db) {
     claimLegacySettings(uid) {
       const row = stmt.getSetting.get('ui');
       if (row && !stmt.getSetting.get('ui:' + uid)) stmt.putSetting.run('ui:' + uid, row.value);
+    },
+    // 예전 공용 즐겨찾기(pages.favorite)는 첫 관리자의 즐겨찾기로 옮긴다
+    claimLegacyFavorites(uid) {
+      db.prepare('INSERT OR IGNORE INTO favorites (user_id, page_id, created_at) SELECT ?, id, ? FROM pages WHERE favorite = 1').run(uid, Date.now());
+      db.prepare('UPDATE pages SET favorite = 0 WHERE favorite = 1').run();
     },
     // 동시 편집 문서 상태
     getYdoc: (id) => stmt.get.get(id)?.ydoc ?? null,
