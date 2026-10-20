@@ -57,3 +57,17 @@
 .viewers-more { font-size: 12px; color: var(--muted); margin-left: 6px; }
 .editor-wait { color: var(--muted); padding: 12px 54px; font-size: 14px; }
 .editor-offline { margin: 0 0 8px; padding: 8px 12px; border-radius: 10px; font-size: 13px; background: color-mix(in srgb, var(--danger) 18%, var(--surface)); color: var(--text); }
+
+.role-legend { display: grid; gap: 4px; font-size: 12px; color: var(--muted); background: var(--sidebar); border-radius: 12px; padding: 10px 12px; }
+.role-legend b { color: var(--text); font-weight: 600; margin-right: 4px; }
+.invite-make { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.invite-make .field { width: auto; }
+.readonly-banner {
+  display: flex; align-items: center; gap: 8px; margin: 0 0 12px; padding: 8px 12px; border-radius: 10px;
+  font-size: 13px; background: var(--sidebar); color: var(--muted);
+}
+.readonly-banner b { color: var(--text); }
+.tree-lock { font-size: 10px; margin-left: 2px; opacity: .7; flex-shrink: 0; }
+
+.db.readonly .board-add, .db.readonly .add-col, .db.readonly .col-add, .db.readonly .db-add-row,
+.db.readonly .cal-add, .db.readonly .th-btn.add, .db.readonly .tl-add { display: none !important; }

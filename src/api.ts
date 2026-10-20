@@ -14,6 +14,11 @@ export type PageMeta = {
   private: boolean;
   // 들어 있는 스페이스 (없으면 전체 공용이거나 개인 페이지)
   spaceId: string | null;
+  // 이 페이지에 건 '관리자만 편집' / 위쪽 페이지까지 포함해 잠겼는지
+  locked: boolean;
+  lockedAny?: boolean;
+  // 내 권한 단계: 1 보기, 2 편집, 3 편집·삭제, 4 관리
+  access?: number;
   deletedAt: number | null;
   createdAt: number;
   updatedAt: number;
@@ -65,7 +70,7 @@ export type WidgetPatch = Partial<Pick<Widget, 'size' | 'color' | 'position' | '
 // 홈 위젯이 받는 데이터베이스 묶음
 export type AgendaDb = { id: string; title: string; icon: string; schema: Schema; rows: Row[] };
 
-export type PagePatch = Partial<Pick<Page, 'title' | 'icon' | 'cover' | 'content' | 'favorite' | 'position' | 'parentId' | 'schema' | 'private' | 'spaceId'>> & {
+export type PagePatch = Partial<Pick<Page, 'title' | 'icon' | 'cover' | 'content' | 'favorite' | 'position' | 'parentId' | 'schema' | 'private' | 'spaceId' | 'locked'>> & {
   props?: Record<string, PropValue | null>;
 };
 
@@ -75,11 +80,11 @@ export type User = {
   nickname: string;
   avatar: string;
   color: TagColor;
-  role: 'admin' | 'member';
+  role: 'admin' | 'full' | 'edit' | 'view';
   disabled: boolean;
 };
 
-export type SpaceMember = { userId: string; role: 'owner' | 'member' };
+export type SpaceMember = { userId: string; role: 'owner' | 'full' | 'edit' | 'view' };
 export type Space = {
   id: string;
   name: string;
@@ -88,14 +93,14 @@ export type Space = {
   position: number;
   createdBy: string;
   createdAt: number;
-  myRole: 'owner' | 'member' | null;
+  myRole: SpaceMember['role'] | null;
   members: SpaceMember[];
 };
 // 최상위 페이지가 놓이는 자리: 전체 공용 / 스페이스 / 내 페이지
 export type Scope = { private?: boolean; spaceId?: string | null };
 
 export type AuthStatus = { setup: boolean; user: User | null };
-export type Invite = { code: string; createdBy: string; createdAt: number; expiresAt: number; usedBy: string | null; usedAt: number | null };
+export type Invite = { code: string; createdBy: string; createdAt: number; expiresAt: number; usedBy: string | null; usedAt: number | null; role: User['role'] };
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -134,7 +139,7 @@ export const api = {
   adminUpdateUser: (id: string, patch: { role?: User['role']; disabled?: boolean; password?: string }) =>
     request<User>('PATCH', `/api/admin/users/${id}`, patch),
   invites: () => request<Invite[]>('GET', '/api/admin/invites'),
-  createInvite: () => request<{ code: string; expiresAt: number }>('POST', '/api/admin/invites'),
+  createInvite: (role: User['role'] = 'edit') => request<{ code: string; expiresAt: number }>('POST', '/api/admin/invites', { role }),
   deleteInvite: (code: string) => request('DELETE', `/api/admin/invites/${encodeURIComponent(code)}`),
 
   listPages: () => request<PageMeta[]>('GET', '/api/pages'),

@@ -23,10 +23,10 @@ const dictionary = {
 const FRAGMENT = 'document-store';
 
 type Conn = { doc: Y.Doc; provider: HocuspocusProvider };
-type Props = { pageId: string; dark: boolean };
+type Props = { pageId: string; dark: boolean; readOnly?: boolean };
 
 // 본문은 서버와 실시간으로 맞춰지고 저장도 서버가 한다. 다른 사람 커서가 이름표와 함께 보인다
-export function Editor({ pageId, dark }: Props) {
+export function Editor({ pageId, dark, readOnly = false }: Props) {
   const me = useMe();
   const [conn, setConn] = useState<Conn | null>(null);
   const [synced, setSynced] = useState(false);
@@ -67,12 +67,12 @@ export function Editor({ pageId, dark }: Props) {
   return (
     <>
       {!online && <div className="editor-offline">⚠ 연결이 끊겼어요. 다시 연결되면 고친 내용이 자동으로 합쳐져요.</div>}
-      <CollabEditor key={pageId} conn={conn} dark={dark} me={me} />
+      <CollabEditor key={pageId} conn={conn} dark={dark} me={me} readOnly={readOnly} />
     </>
   );
 }
 
-function CollabEditor({ conn, dark, me }: { conn: Conn; dark: boolean; me: User }) {
+function CollabEditor({ conn, dark, me, readOnly }: { conn: Conn; dark: boolean; me: User; readOnly: boolean }) {
   const editor = useCreateBlockNote(
     withCollaboration({
       dictionary,
@@ -89,7 +89,7 @@ function CollabEditor({ conn, dark, me }: { conn: Conn; dark: boolean; me: User 
 
   return (
     <div className="editor-wrap">
-      <BlockNoteView editor={editor} theme={dark ? 'dark' : 'light'} />
+      <BlockNoteView editor={editor} theme={dark ? 'dark' : 'light'} editable={!readOnly} />
     </div>
   );
 }

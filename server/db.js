@@ -37,6 +37,8 @@ export function openDb(dataDir) {
   if (!cols.has('ydoc')) db.exec('ALTER TABLE pages ADD COLUMN ydoc BLOB');
   // 0.6.0: 스페이스 (멤버만 보는 공용 구역)
   if (!cols.has('space_id')) db.exec('ALTER TABLE pages ADD COLUMN space_id TEXT');
+  // 0.7.0: 관리자만 편집 (하위 페이지에도 적용)
+  if (!cols.has('locked')) db.exec('ALTER TABLE pages ADD COLUMN locked INTEGER NOT NULL DEFAULT 0');
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_pages_space ON pages(space_id);
     CREATE TABLE IF NOT EXISTS spaces (
@@ -59,7 +61,19 @@ export function openDb(dataDir) {
   return db;
 }
 
-const LIST_COLUMNS = 'id, parent_id, kind, title, icon, cover, position, favorite, deleted_at, created_at, updated_at, private_owner, space_id';
+const LIST_COLUMNS = 'id, parent_id, kind, title, icon, cover, position, favorite, deleted_at, created_at, updated_at, private_owner, space_id, locked';
+
+// 권한 단계: 보기 < 편집 < 편집·삭제 < 관리
+export const VIEW = 1;
+export const EDIT = 2;
+export const DELETE = 3;
+export const MANAGE = 4;
+const ROLE_LEVEL = { admin: MANAGE, owner: MANAGE, full: DELETE, edit: EDIT, view: VIEW };
+const DENIED = {
+  [EDIT]: '이 문서를 고칠 권한이 없어요.',
+  [DELETE]: '이 문서를 지울 권한이 없어요.',
+  [MANAGE]: '관리자만 할 수 있어요.',
+};
 
 // 볼 수 있는 페이지 조건 (uid 를 두 번 넘긴다): 내 개인 페이지이거나, 전체 공용이거나, 내가 멤버인 스페이스
 export const VISIBLE_SQL = `(private_owner = ? OR (private_owner IS NULL AND (space_id IS NULL
@@ -167,6 +181,7 @@ function toPage(row, withContent = false) {
     favorite: !!row.favorite,
     private: row.private_owner != null,
     spaceId: row.space_id ?? null,
+    locked: !!row.locked,
     deletedAt: row.deleted_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -228,17 +243,69 @@ export function createRepo(db) {
     }
     return { owner: null, space: null };
   }
+  // ── 권한 ──
+  const siteRole = (uid) => (uid ? db.prepare('SELECT role FROM users WHERE id = ? AND disabled = 0').get(uid)?.role ?? null : null);
+  // 자리(개인 / 스페이스 / 전체 공용)에서의 내 권한 단계
+  function scopeLevel(owner, space, uid) {
+    if (owner != null) return owner === uid ? MANAGE : 0;
+    const site = siteRole(uid);
+    if (site === 'admin') return MANAGE;
+    if (space != null) return ROLE_LEVEL[stmt.isMember.get(space, uid)?.role] ?? 0;
+    return ROLE_LEVEL[site] ?? 0;
+  }
+  // 자기나 상위 페이지 중 하나라도 잠겼는지
+  function lockedChain(row, get = (id) => stmt.get.get(id)) {
+    let cur = row;
+    for (let i = 0; cur && i < 100; i++) {
+      if (cur.locked) return true;
+      cur = cur.parent_id ? get(cur.parent_id) : null;
+    }
+    return false;
+  }
+  // 이 페이지에서의 내 권한 단계 (잠긴 문서는 관리자가 아니면 보기만)
+  function levelFor(row, uid, base = scopeLevel(row.private_owner, row.space_id, uid), locked = lockedChain(row)) {
+    return locked && base < MANAGE ? Math.min(base, VIEW) : base;
+  }
+  function need(row, uid, level) {
+    if (levelFor(row, uid) < level) throw httpError(403, DENIED[level]);
+  }
+  function needScope(scope, uid, level) {
+    if (scopeLevel(scope.owner, scope.space, uid) < level) throw httpError(403, DENIED[level]);
+  }
+  // 화면에 알려 줄 권한 정보
+  const withAccess = (page, row, uid, base, locked) => ({ ...page, lockedAny: locked, access: levelFor(row, uid, base, locked) });
+
   function access(id, uid) {
     const row = stmt.get.get(id);
     if (!visible(row, uid)) throw httpError(404, '페이지를 찾을 수 없습니다.');
     return row;
   }
   const view = (id) => toPage(stmt.get.get(id), true);
+  const viewFor = (id, uid) => {
+    const row = stmt.get.get(id);
+    return withAccess(toPage(row, true), row, uid, scopeLevel(row.private_owner, row.space_id, uid), lockedChain(row));
+  };
 
   const repo = {
-    list: (uid) => stmt.list.all(uid, uid).map((r) => toPage(r)),
-    get: (id, uid) => (visible(stmt.get.get(id), uid) ? view(id) : null),
+    list(uid) {
+      const rows = stmt.list.all(uid, uid);
+      const byId = new Map(rows.map((r) => [r.id, r]));
+      const get = (id) => byId.get(id) ?? stmt.get.get(id);
+      const levels = new Map();
+      return rows.map((r) => {
+        const key = `${r.private_owner}|${r.space_id}`;
+        if (!levels.has(key)) levels.set(key, scopeLevel(r.private_owner, r.space_id, uid));
+        return withAccess(toPage(r), r, uid, levels.get(key), lockedChain(r, get));
+      });
+    },
+    get: (id, uid) => (visible(stmt.get.get(id), uid) ? viewFor(id, uid) : null),
     canAccess: (id, uid) => visible(stmt.get.get(id), uid),
+    canEdit: (id, uid) => {
+      const row = stmt.get.get(id);
+      return visible(row, uid) && levelFor(row, uid) >= EDIT;
+    },
+    // 그 자리(전체 공용 / 스페이스)에서의 내 권한 단계
+    scopeLevel: (space, uid) => scopeLevel(null, space ?? null, uid),
     // 권한 확인 없이 (동시 편집 서버가 이미 확인한 뒤 쓴다)
     getRaw: (id) => view(id),
 
@@ -255,8 +322,13 @@ export function createRepo(db) {
       const schema = kind === 'database' ? JSON.stringify(defaultSchema()) : null;
       const rowProps = kind === 'row' ? JSON.stringify(mergeProps({}, props)) : '{}';
       const scope = parent ? { owner: parent.private_owner, space: parent.space_id } : rootScope({ private: isPrivate && !!uid, spaceId }, uid);
+      // uid 가 없으면 서버가 직접 만드는 것 (첫 실행 안내 페이지)
+      if (uid != null) {
+        if (parent) need(parent, uid, EDIT);
+        else needScope(scope, uid, EDIT);
+      }
       stmt.insert.run(id, parentId, kind, str(title, 300), icon, cover, JSON.stringify(content), rowProps, schema, pos, now, now, scope.owner, scope.space);
-      return view(id);
+      return viewFor(id, uid);
     },
 
     // 홈 위젯이 쓰는 모든 데이터베이스 (휴지통 제외)와 행
@@ -272,6 +344,7 @@ export function createRepo(db) {
     database(id, uid) {
       const page = repo.get(id, uid);
       if (!page || page.kind !== 'database') throw httpError(404, '데이터베이스를 찾을 수 없어요.');
+      // (page 에 access·lockedAny 가 들어 있다)
       return { ...page, rows: stmt.rows.all(id).map(toRow) };
     },
 
@@ -281,6 +354,9 @@ export function createRepo(db) {
       let space = cur.space_id;
       // 최상위로 옮길 때 자리를 정했는지 (private 또는 spaceId)
       const placed = typeof patch.private === 'boolean' || 'spaceId' in patch;
+      // 즐겨찾기만 바꾸는 건 보기 권한으로도 된다. 잠금은 관리자만, 나머지는 편집 권한
+      const keys = Object.keys(patch);
+      if (keys.some((k) => k !== 'favorite' && k !== 'locked')) need(cur, uid, EDIT);
       const fields = [];
       const values = [];
       const set = (col, val) => { fields.push(`${col} = ?`); values.push(val); };
@@ -294,6 +370,10 @@ export function createRepo(db) {
         set('ydoc', null);
       }
       if (typeof patch.favorite === 'boolean') set('favorite', patch.favorite ? 1 : 0);
+      if (typeof patch.locked === 'boolean') {
+        if (scopeLevel(cur.private_owner, cur.space_id, uid) < MANAGE) throw httpError(403, DENIED[MANAGE]);
+        set('locked', patch.locked ? 1 : 0);
+      }
       if (typeof patch.position === 'number' && Number.isFinite(patch.position)) set('position', patch.position);
       if (patch.schema !== undefined) {
         if (cur.kind !== 'database') throw httpError(400, '데이터베이스가 아니에요.');
@@ -311,31 +391,39 @@ export function createRepo(db) {
           if (!visible(parent, uid)) throw httpError(400, '상위 페이지가 없습니다.');
           if (parent.kind !== 'page') throw httpError(400, '데이터베이스 안으로는 옮길 수 없어요.');
           if (subtree(id).includes(parentId)) throw httpError(400, '자기 자신이나 하위 페이지 안으로는 옮길 수 없습니다.');
+          need(parent, uid, EDIT);
           owner = parent.private_owner;
           space = parent.space_id;
         } else if (placed) {
           ({ owner, space } = rootScope({ private: patch.private === true, spaceId: patch.spaceId || null }, uid));
+          needScope({ owner, space }, uid, EDIT);
+        } else {
+          needScope({ owner, space }, uid, EDIT);
         }
         set('parent_id', parentId);
       } else if (placed && !cur.parent_id && cur.kind !== 'row') {
         // 최상위 페이지를 다른 자리(전체 공용 / 스페이스 / 내 페이지)로 옮기기
         ({ owner, space } = rootScope({ private: patch.private === true, spaceId: patch.spaceId || null }, uid));
+        needScope({ owner, space }, uid, EDIT);
       }
       const moved = owner !== cur.private_owner || space !== cur.space_id;
       if (moved) {
         // 하위 페이지·데이터베이스 항목도 같이 옮긴다
         for (const pid of subtree(id)) stmt.setScope.run(owner, space, pid);
       }
-      if (!fields.length && !moved) return view(id);
+      if (!fields.length && !moved) return viewFor(id, uid);
       set('updated_at', Date.now());
       db.prepare(`UPDATE pages SET ${fields.join(', ')} WHERE id = ?`).run(...values, id);
-      return view(id);
+      return viewFor(id, uid);
     },
 
     // 페이지를 하위 페이지·데이터베이스 항목까지 통째로 복사해서 바로 아래에 놓는다
     duplicate(id, uid) {
       const src = access(id, uid);
       if (src.deleted_at != null) throw httpError(404, '페이지를 찾을 수 없습니다.');
+      // 복사본은 원본 옆에 생기므로 그 자리에 만들 권한이 있어야 한다 (복사본은 잠기지 않는다)
+      if (src.parent_id) need(stmt.get.get(src.parent_id), uid, EDIT);
+      else needScope({ owner: src.private_owner, space: src.space_id }, uid, EDIT);
       const next = db.prepare('SELECT MIN(position) AS p FROM pages WHERE parent_id IS ? AND position > ? AND deleted_at IS NULL')
         .get(src.parent_id, src.position).p;
       const position = next == null ? src.position + 1 : (src.position + next) / 2;
@@ -354,7 +442,7 @@ export function createRepo(db) {
         const title = `${src.title.trim() || '제목 없음'} (사본)`.slice(0, 300);
         const newId = copy(src, src.parent_id, position, title);
         db.exec('COMMIT');
-        return view(newId);
+        return viewFor(newId, uid);
       } catch (err) {
         db.exec('ROLLBACK');
         throw err;
@@ -362,7 +450,7 @@ export function createRepo(db) {
     },
 
     trash(id, uid) {
-      access(id, uid);
+      need(access(id, uid), uid, DELETE);
       const now = Date.now();
       for (const pid of subtree(id)) {
         const row = stmt.get.get(pid);
@@ -372,6 +460,7 @@ export function createRepo(db) {
 
     restore(id, uid) {
       const row = access(id, uid);
+      need(row, uid, DELETE);
       // 상위 페이지가 휴지통에 있으면 최상위로 꺼낸다
       if (row.parent_id) {
         const parent = stmt.get.get(row.parent_id);
@@ -386,14 +475,18 @@ export function createRepo(db) {
     },
 
     destroy(id, uid) {
-      access(id, uid);
+      need(access(id, uid), uid, DELETE);
       const ids = subtree(id).reverse();
       for (const pid of ids) stmt.remove.run(pid);
     },
 
     emptyTrash(uid) {
       const trashed = db.prepare(`SELECT id FROM pages WHERE deleted_at IS NOT NULL AND ${VISIBLE_SQL}`).all(uid, uid);
-      for (const r of trashed) if (stmt.get.get(r.id)) repo.destroy(r.id, uid);
+      // 지울 권한이 있는 것만 비운다
+      for (const r of trashed) {
+        const row = stmt.get.get(r.id);
+        if (row && levelFor(row, uid) >= DELETE) repo.destroy(r.id, uid);
+      }
     },
 
     // 화면 설정은 사람마다 따로 (예전 공용 설정은 첫 관리자에게 넘긴다)

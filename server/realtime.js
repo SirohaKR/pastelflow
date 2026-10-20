@@ -90,8 +90,10 @@ export function setupRealtime(server, { repo, userFromRequest }) {
     debounce: 1500,
     maxDebounce: 8000,
     // 페이지마다 볼 수 있는 사람만 들어온다
-    async onAuthenticate({ documentName, context }) {
+    async onAuthenticate({ documentName, context, connectionConfig }) {
       if (!context?.user || !repo.canAccess(documentName, context.user.id)) throw new Error('forbidden');
+      // 고칠 권한이 없으면 보기만 (보내는 수정은 서버가 버린다)
+      connectionConfig.readOnly = !repo.canEdit(documentName, context.user.id);
     },
     // 처음 열 때: 저장된 Yjs 상태가 없으면 지금까지의 JSON 본문으로 만든다
     async onLoadDocument({ documentName, document }) {

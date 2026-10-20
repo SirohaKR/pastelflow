@@ -112,7 +112,7 @@ app.use(['/api', '/uploads'], (req, res, next) => {
 
 // 페이지·데이터베이스를 바꾸면 다른 사람 화면에 알린다
 let realtime = null;
-app.use(['/api/pages', '/api/databases', '/api/trash', '/api/spaces'], (req, res, next) => {
+app.use(['/api/pages', '/api/databases', '/api/trash', '/api/spaces', '/api/admin/users', '/api/me'], (req, res, next) => {
   if (req.method !== 'GET') {
     res.on('finish', () => {
       if (res.statusCode < 400) realtime?.broadcastChange(String(req.get('x-client-id') || ''));
@@ -149,8 +149,8 @@ app.get('/api/admin/users', requireAdmin, (_req, res) => res.json(users.list()))
 app.patch('/api/admin/users/:id', requireAdmin, (req, res) => res.json(publicUser(users.adminUpdate(req.user.id, req.params.id, req.body || {}))));
 app.get('/api/admin/invites', requireAdmin, (_req, res) => res.json(users.listInvites()));
 app.post('/api/admin/invites', requireAdmin, (req, res) => {
-  const inv = users.createInvite(req.user.id);
-  res.status(201).json({ code: inv.code, expiresAt: inv.expires_at });
+  const inv = users.createInvite(req.user.id, req.body?.role);
+  res.status(201).json({ code: inv.code, expiresAt: inv.expires_at, role: inv.role });
 });
 app.delete('/api/admin/invites/:code', requireAdmin, (req, res) => {
   users.deleteInvite(req.params.code);

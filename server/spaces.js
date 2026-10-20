@@ -3,9 +3,13 @@ import { httpError } from './db.js';
 
 // 스페이스: 디스코드 채널처럼 멤버만 안의 페이지를 보는 공용 구역
 const COLORS = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6'];
-const ROLES = ['owner', 'member'];
+// 스페이스 안 역할: 스페이스 관리자 > 편집·삭제 > 편집 > 보기 전용
+export const SPACE_ROLES = ['owner', 'full', 'edit', 'view'];
+const ROLES = SPACE_ROLES;
 
 export function createSpaceRepo(db, users) {
+  // 0.7.0: 예전 '멤버'는 지금과 같게 '편집·삭제'로
+  db.exec("UPDATE space_members SET role = 'full' WHERE role = 'member'");
   const stmt = {
     get: db.prepare('SELECT * FROM spaces WHERE id = ?'),
     all: db.prepare('SELECT * FROM spaces ORDER BY position, created_at'),
@@ -58,7 +62,7 @@ export function createSpaceRepo(db, users) {
     const map = new Map();
     for (const m of Array.isArray(list) ? list : []) {
       const uid = typeof m === 'string' ? m : m?.userId;
-      const role = ROLES.includes(m?.role) ? m.role : 'member';
+      const role = ROLES.includes(m?.role) ? m.role : 'edit';
       const u = uid && users.get(uid);
       if (u && !u.disabled) map.set(uid, map.get(uid) === 'owner' ? 'owner' : role);
     }
@@ -73,6 +77,7 @@ export function createSpaceRepo(db, users) {
     isMember: (spaceId, uid) => !!stmt.member.get(spaceId, uid),
 
     create({ name, icon = '', color, members = [] } = {}, user) {
+      if (user.role === 'view') throw httpError(403, '보기 전용 계정은 스페이스를 만들 수 없어요.');
       const id = randomUUID();
       const map = cleanMembers(members, user.id);
       map.set(user.id, 'owner'); // 만든 사람은 관리자

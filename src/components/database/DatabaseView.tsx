@@ -33,6 +33,8 @@ type Props_ = {
   onSaveState: (s: SaveState) => void;
   onError: (msg: string) => void;
   onPagesChanged: () => void;
+  // 내 권한 단계 (2 미만이면 보기만, 3 미만이면 항목 지우기 불가)
+  access: number;
 };
 
 function loadView(dbId: string): ViewKind {
@@ -45,7 +47,8 @@ function loadView(dbId: string): ViewKind {
   return 'table';
 }
 
-export function DatabaseView({ dbId, dark, dataVersion, onSaveState, onError, onPagesChanged }: Props_) {
+export function DatabaseView({ dbId, dark, dataVersion, onSaveState, onError, onPagesChanged, access }: Props_) {
+  const readOnly = access < 2;
   const [db, setDb] = useState<Database | null>(null);
   const [schema, setSchema] = useState<Schema | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
@@ -216,14 +219,22 @@ export function DatabaseView({ dbId, dark, dataVersion, onSaveState, onError, on
 
   if (!db || !schema) return <div className="db-loading">데이터베이스를 불러오는 중…</div>;
 
-  const ops: DbOps = {
-    schema, rows: visibleRows, updateRow, addRow, openRow: setPeekId, saveSchema, setOptions,
-    addProperty, updateProperty, changeType, deleteProperty,
-  };
+  // 보기 전용이면 고치는 동작을 막고 알려 준다 (서버에서도 막는다)
+  const denied = () => onError('보기 전용이라 고칠 수 없어요.');
+  const ops: DbOps = readOnly
+    ? {
+      schema, rows: visibleRows, openRow: setPeekId,
+      updateRow: denied, addRow: async () => { denied(); return undefined; }, saveSchema: denied, setOptions: denied,
+      addProperty: (type) => { denied(); return { id: '', name: '', type }; }, updateProperty: denied, changeType: denied, deleteProperty: denied,
+    }
+    : {
+      schema, rows: visibleRows, updateRow, addRow, openRow: setPeekId, saveSchema, setOptions,
+      addProperty, updateProperty, changeType, deleteProperty,
+    };
   const peekRow = rows.find((r) => r.id === peekId);
 
   return (
-    <div className="db">
+    <div className={`db ${readOnly ? 'readonly' : ''}`}>
       <div className="db-toolbar">
         <div className="db-tabs" role="tablist">
           {VIEWS.map((v) => (
@@ -234,8 +245,12 @@ export function DatabaseView({ dbId, dark, dataVersion, onSaveState, onError, on
         </div>
         <div className="db-tools">
           <input className="field small db-search" placeholder="🔍 항목 찾기" value={query} onChange={(e) => setQuery(e.target.value)} />
-          <button className="btn ghost" onClick={(e) => setAddPropAnchor(e.currentTarget)}>＋ 속성</button>
-          <button className="btn" onClick={() => addRow({}, true)}>＋ 새 항목</button>
+          {!readOnly && (
+            <>
+              <button className="btn ghost" onClick={(e) => setAddPropAnchor(e.currentTarget)}>＋ 속성</button>
+              <button className="btn" onClick={() => addRow({}, true)}>＋ 새 항목</button>
+            </>
+          )}
         </div>
       </div>
 
@@ -255,6 +270,7 @@ export function DatabaseView({ dbId, dark, dataVersion, onSaveState, onError, on
           onLocalChange={patchLocal}
           onClose={() => setPeekId(null)}
           onDelete={() => deleteRow(peekRow.id)}
+          access={access}
           onSaveState={onSaveState}
           onError={onError}
         />

@@ -6,6 +6,8 @@ const SESSION_DAYS = 30;
 const INVITE_DAYS = 7;
 const COLORS = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6'];
 const USERNAME = /^[a-z0-9][a-z0-9_.-]{2,19}$/;
+// 전체 공용에서의 역할: 관리자 > 편집·삭제 > 편집 > 보기 전용
+export const SITE_ROLES = ['admin', 'full', 'edit', 'view'];
 
 const sha256 = (v) => createHash('sha256').update(v).digest('hex');
 
@@ -87,6 +89,10 @@ export function createUserRepo(db) {
       used_at INTEGER
     );
   `);
+  // 0.7.0: 역할 4단계. 예전 '멤버'는 지금과 같게 '편집·삭제'로
+  db.exec("UPDATE users SET role = 'full' WHERE role = 'member'");
+  const inviteCols = new Set(db.prepare('PRAGMA table_info(invites)').all().map((c) => c.name));
+  if (!inviteCols.has('role')) db.exec("ALTER TABLE invites ADD COLUMN role TEXT NOT NULL DEFAULT 'edit'");
 
   const stmt = {
     count: db.prepare('SELECT COUNT(*) AS n FROM users'),
@@ -102,7 +108,7 @@ export function createUserRepo(db) {
     purgeSessions: db.prepare('DELETE FROM sessions WHERE expires_at < ?'),
     invite: db.prepare('SELECT * FROM invites WHERE code = ?'),
     invites: db.prepare('SELECT * FROM invites ORDER BY created_at DESC'),
-    addInvite: db.prepare('INSERT INTO invites (code, created_by, created_at, expires_at) VALUES (?, ?, ?, ?)'),
+    addInvite: db.prepare('INSERT INTO invites (code, created_by, created_at, expires_at, role) VALUES (?, ?, ?, ?, ?)'),
     useInvite: db.prepare('UPDATE invites SET used_by = ?, used_at = ? WHERE code = ? AND used_by IS NULL'),
     delInvite: db.prepare('DELETE FROM invites WHERE code = ?'),
   };
@@ -112,7 +118,8 @@ export function createUserRepo(db) {
     get: (id) => stmt.get.get(id),
     list: () => stmt.list.all().map(publicUser),
 
-    create({ username, password, nickname, role = 'member' }) {
+    create({ username, password, nickname, role = 'edit' }) {
+      if (!SITE_ROLES.includes(role)) role = 'edit';
       const name = cleanUsername(username);
       if (stmt.byName.get(name)) throw httpError(409, '이미 쓰고 있는 아이디예요.');
       const id = randomUUID();
@@ -153,10 +160,11 @@ export function createUserRepo(db) {
     adminUpdate(actorId, id, patch) {
       const u = stmt.get.get(id);
       if (!u) throw httpError(404, '사용자를 찾을 수 없어요.');
-      const losingAdmin = (patch.role === 'member' || patch.disabled === true) && u.role === 'admin' && !u.disabled;
+      if (patch.role !== undefined && !SITE_ROLES.includes(patch.role)) throw httpError(400, '알 수 없는 역할이에요.');
+      const losingAdmin = ((SITE_ROLES.includes(patch.role) && patch.role !== 'admin') || patch.disabled === true) && u.role === 'admin' && !u.disabled;
       if (losingAdmin && id === actorId) throw httpError(400, '나 자신의 관리자 권한은 뺄 수 없어요.');
       if (losingAdmin && stmt.admins.get().n <= 1) throw httpError(400, '관리자는 한 명 이상 있어야 해요.');
-      if (patch.role === 'admin' || patch.role === 'member') db.prepare('UPDATE users SET role = ? WHERE id = ?').run(patch.role, id);
+      if (SITE_ROLES.includes(patch.role)) db.prepare('UPDATE users SET role = ? WHERE id = ?').run(patch.role, id);
       if (typeof patch.disabled === 'boolean') {
         db.prepare('UPDATE users SET disabled = ? WHERE id = ?').run(patch.disabled ? 1 : 0, id);
         if (patch.disabled) stmt.delUserSessions.run(id);
@@ -182,14 +190,15 @@ export function createUserRepo(db) {
     SESSION_DAYS,
 
     // ── 초대 ──
-    createInvite(by) {
+    // 가입할 사람의 전체 공용 역할을 미리 정한다 (관리자는 초대로 줄 수 없음)
+    createInvite(by, role = 'edit') {
       const code = randomBytes(12).toString('base64url');
       const now = Date.now();
-      stmt.addInvite.run(code, by, now, now + INVITE_DAYS * 86400_000);
+      stmt.addInvite.run(code, by, now, now + INVITE_DAYS * 86400_000, ['full', 'edit', 'view'].includes(role) ? role : 'edit');
       return stmt.invite.get(code);
     },
     listInvites: () => stmt.invites.all().map((i) => ({
-      code: i.code, createdBy: i.created_by, createdAt: i.created_at, expiresAt: i.expires_at, usedBy: i.used_by, usedAt: i.used_at,
+      code: i.code, createdBy: i.created_by, createdAt: i.created_at, expiresAt: i.expires_at, usedBy: i.used_by, usedAt: i.used_at, role: i.role,
     })),
     deleteInvite: (code) => stmt.delInvite.run(code),
     // 쓸 수 있는 초대면 만든 사람을 돌려준다
@@ -200,9 +209,10 @@ export function createUserRepo(db) {
     },
     register({ code, username, password, nickname }) {
       repo.checkInvite(code);
+      const role = stmt.invite.get(code)?.role ?? 'edit';
       db.exec('BEGIN');
       try {
-        const u = repo.create({ username, password, nickname });
+        const u = repo.create({ username, password, nickname, role });
         if (stmt.useInvite.run(u.id, Date.now(), code).changes !== 1) throw httpError(409, '초대 링크가 방금 쓰였어요.');
         db.exec('COMMIT');
         return u;

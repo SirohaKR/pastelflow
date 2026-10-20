@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, type Invite, type User } from '../api';
 import { TAGS } from './home/model';
 import { Modal } from './Popover';
+import { SITE_ROLES, siteRoleLabel } from '../roles';
 import './account.css';
 
 // ── 프로필 사진 (사진이 없으면 별명 첫 글자) ─────────────────────────
@@ -161,7 +162,7 @@ export function ProfileDialog({ me, onChange, onClose, onError }: { me: User; on
               onBlur={() => nickname.trim() && nickname !== me.nickname && save({ nickname })}
               onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
             />
-            <small className="w-sub">@{me.username} · {me.role === 'admin' ? '관리자' : '멤버'}</small>
+            <small className="w-sub">@{me.username} · 전체 공용 {siteRoleLabel(me.role)}</small>
             {me.avatar && <button className="btn ghost small" onClick={() => save({ avatar: '' })}>사진 지우기</button>}
           </div>
           <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = ''; }} />
@@ -209,6 +210,7 @@ export function MembersDialog({ me, onClose, onError }: { me: User; onClose: () 
   const [copied, setCopied] = useState('');
   const [resetFor, setResetFor] = useState<string | null>(null);
   const [newPw, setNewPw] = useState('');
+  const [inviteRole, setInviteRole] = useState<User['role']>('edit');
 
   const load = () => {
     api.adminUsers().then(setList).catch((e) => onError(e.message));
@@ -253,6 +255,10 @@ export function MembersDialog({ me, onClose, onError }: { me: User; onClose: () 
         </div>
 
         {tab === 'members' && (
+          <>
+          <div className="role-legend">
+            {SITE_ROLES.map((r) => <span key={r.key}><b>{r.label}</b> {r.desc}</span>)}
+          </div>
           <ul className="member-list">
             {list.map((u) => (
               <li key={u.id} className={u.disabled ? 'disabled' : ''}>
@@ -267,8 +273,7 @@ export function MembersDialog({ me, onClose, onError }: { me: User; onClose: () 
                   disabled={u.id === me.id}
                   onChange={(e) => run(() => api.adminUpdateUser(u.id, { role: e.target.value as User['role'] }))}
                 >
-                  <option value="member">멤버</option>
-                  <option value="admin">관리자</option>
+                  {SITE_ROLES.map((r) => <option key={r.key} value={r.key} title={r.desc}>{r.label}</option>)}
                 </select>
                 {u.id !== me.id && (
                   <div className="member-actions">
@@ -298,14 +303,20 @@ export function MembersDialog({ me, onClose, onError }: { me: User; onClose: () 
               </li>
             ))}
           </ul>
+          </>
         )}
 
         {tab === 'invites' && (
           <div className="invite-box">
-            <p className="w-sub">초대 링크는 한 사람만, 7일 동안 쓸 수 있어요.</p>
-            <button className="btn" onClick={() => run(async () => { const inv = await api.createInvite(); await copy(inv.code); })}>
-              ＋ 새 초대 링크 만들고 복사
-            </button>
+            <p className="w-sub">초대 링크는 한 사람만, 7일 동안 쓸 수 있어요. 가입하면 아래에서 고른 역할을 받아요.</p>
+            <div className="invite-make">
+              <select className="field small" value={inviteRole} onChange={(e) => setInviteRole(e.target.value as User['role'])}>
+                {SITE_ROLES.filter((r) => r.key !== 'admin').map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+              </select>
+              <button className="btn" onClick={() => run(async () => { const inv = await api.createInvite(inviteRole); await copy(inv.code); })}>
+                ＋ 새 초대 링크 만들고 복사
+              </button>
+            </div>
             <ul className="member-list">
               {invites.length === 0 && <li className="w-sub">아직 만든 초대 링크가 없어요.</li>}
               {invites.map((i) => {
@@ -315,7 +326,7 @@ export function MembersDialog({ me, onClose, onError }: { me: User; onClose: () 
                   <li key={i.code} className={live ? '' : 'disabled'}>
                     <code className="invite-code">…{i.code.slice(-6)}</code>
                     <div className="member-name">
-                      <b>{state}</b>
+                      <b>{state} · {siteRoleLabel(i.role)}</b>
                       <small className="w-sub">{new Date(i.createdAt).toLocaleDateString('ko-KR')} · {nameOf(i.createdBy)}</small>
                     </div>
                     {live && <button className="btn ghost small" onClick={() => copy(i.code)}>{copied === i.code ? '✓ 복사됨' : '링크 복사'}</button>}

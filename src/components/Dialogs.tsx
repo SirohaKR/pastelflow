@@ -93,14 +93,20 @@ export function TrashDialog({ pages, onChanged, onClose }: { pages: PageMeta[]; 
             <PageIcon p={p} />
             <span className="tree-title">{displayTitle(p)}</span>
             <span className="sub">{timeAgo(p.deletedAt!)}</span>
-            <button className="btn ghost" onClick={() => run(() => api.restorePage(p.id))}>되돌리기</button>
-            <button
-              className="btn ghost"
-              style={{ color: 'var(--danger)' }}
-              onClick={() => confirm(`'${displayTitle(p)}'와 하위 페이지를 완전히 지울까요?`) && run(() => api.deletePage(p.id))}
-            >
-              완전 삭제
-            </button>
+            {(p.access ?? 4) >= 3 ? (
+              <>
+                <button className="btn ghost" onClick={() => run(() => api.restorePage(p.id))}>되돌리기</button>
+                <button
+                  className="btn ghost"
+                  style={{ color: 'var(--danger)' }}
+                  onClick={() => confirm(`'${displayTitle(p)}'와 하위 페이지를 완전히 지울까요?`) && run(() => api.deletePage(p.id))}
+                >
+                  완전 삭제
+                </button>
+              </>
+            ) : (
+              <span className="sub">지울 권한이 있는 사람만 되돌릴 수 있어요</span>
+            )}
           </div>
         ))}
       </div>

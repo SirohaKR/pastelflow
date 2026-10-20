@@ -4,6 +4,7 @@ import { TAGS } from './home/model';
 import { Avatar } from './Account';
 import { EmojiPicker } from './Pickers';
 import { Modal } from './Popover';
+import { SPACE_ROLES } from '../roles';
 import './spaces.css';
 
 type Props = {
@@ -27,7 +28,7 @@ export function SpaceDialog({ space, me, users, onSaved, onClose, onError }: Pro
 
   const roleOf = (uid: string) => members.find((m) => m.userId === uid)?.role ?? null;
   const toggle = (uid: string) =>
-    setMembers((ms) => (ms.some((m) => m.userId === uid) ? ms.filter((m) => m.userId !== uid) : [...ms, { userId: uid, role: 'member' }]));
+    setMembers((ms) => (ms.some((m) => m.userId === uid) ? ms.filter((m) => m.userId !== uid) : [...ms, { userId: uid, role: 'edit' }]));
   const setRole = (uid: string, role: SpaceMember['role']) => setMembers((ms) => ms.map((m) => (m.userId === uid ? { ...m, role } : m)));
 
   const save = async () => {
@@ -87,7 +88,7 @@ export function SpaceDialog({ space, me, users, onSaved, onClose, onError }: Pro
         </section>
 
         <section>
-          <h4>멤버 {members.length}명 <span className="w-sub">· 멤버만 이 스페이스와 안의 페이지를 볼 수 있어요</span></h4>
+          <h4>멤버 {members.length}명 <span className="w-sub">· 멤버만 이 스페이스와 안의 페이지를 볼 수 있어요. 역할은 사람마다 따로 정해요</span></h4>
           <ul className="member-list compact">
             {people.map((u) => {
               const role = roleOf(u.id);
@@ -103,8 +104,7 @@ export function SpaceDialog({ space, me, users, onSaved, onClose, onError }: Pro
                   </label>
                   {role && (
                     <select className="field small" value={role} disabled={!canManage} onChange={(e) => setRole(u.id, e.target.value as SpaceMember['role'])}>
-                      <option value="member">멤버</option>
-                      <option value="owner">스페이스 관리자</option>
+                      {SPACE_ROLES.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
                     </select>
                   )}
                 </li>

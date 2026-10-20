@@ -16,6 +16,7 @@ type Props = {
   onDelete: () => void;
   onSaveState: (s: SaveState) => void;
   onError: (msg: string) => void;
+  access: number;
 };
 
 function loadWide() {
@@ -27,7 +28,8 @@ function loadWide() {
 }
 
 // 행을 오른쪽 패널로 열어 속성과 본문(BlockNote)을 고친다
-export function RowPeek({ row, ops, dark, onLocalChange, onClose, onDelete, onSaveState, onError }: Props) {
+export function RowPeek({ row, ops, dark, onLocalChange, onClose, onDelete, onSaveState, onError, access }: Props) {
+  const canEdit = access >= 2;
   const [page, setPage] = useState<Page | null>(null);
   const [title, setTitle] = useState(row.title);
   const [icon, setIcon] = useState(row.icon);
@@ -86,20 +88,22 @@ export function RowPeek({ row, ops, dark, onLocalChange, onClose, onDelete, onSa
           <button className="icon-btn" title="닫기" onClick={onClose}>»</button>
           <button className="icon-btn" title={wide ? '패널로 보기' : '넓게 보기'} onClick={toggleWide}>{wide ? '⇥' : '⤢'}</button>
           <span className="peek-spacer" />
-          <button
-            className="btn ghost danger-text"
-            onClick={() => confirm('이 항목을 휴지통으로 옮길까요?') && onDelete()}
-          >
-            🗑️ 휴지통으로
-          </button>
+          {access >= 3 && (
+            <button
+              className="btn ghost danger-text"
+              onClick={() => confirm('이 항목을 휴지통으로 옮길까요?') && onDelete()}
+            >
+              🗑️ 휴지통으로
+            </button>
+          )}
         </div>
 
         <div className="peek-scroll">
           <div className="peek-body">
             <div className="peek-head">
               {icon ? (
-                <button className="page-icon small" title="아이콘 바꾸기" onClick={(e) => setEmojiAnchor(e.currentTarget)}>{icon}</button>
-              ) : (
+                <button className="page-icon small" title="아이콘 바꾸기" disabled={!canEdit} onClick={(e) => setEmojiAnchor(e.currentTarget)}>{icon}</button>
+              ) : !canEdit ? null : (
                 <button
                   className="btn ghost add-icon"
                   onClick={() => {
@@ -115,6 +119,7 @@ export function RowPeek({ row, ops, dark, onLocalChange, onClose, onDelete, onSa
                 ref={titleRef}
                 rows={1}
                 className="title-input peek-title"
+                readOnly={!canEdit}
                 value={title}
                 placeholder="제목 없음"
                 autoFocus={!row.title}
@@ -146,13 +151,13 @@ export function RowPeek({ row, ops, dark, onLocalChange, onClose, onDelete, onSa
                   </div>
                 </div>
               ))}
-              <button className="btn ghost add-prop" onClick={(e) => setAddAnchor(e.currentTarget)}>＋ 속성 추가</button>
+              {canEdit && <button className="btn ghost add-prop" onClick={(e) => setAddAnchor(e.currentTarget)}>＋ 속성 추가</button>}
             </div>
 
             <div className="peek-divider" />
 
             {page ? (
-              <Editor pageId={page.id} dark={dark} />
+              <Editor pageId={page.id} dark={dark} readOnly={!canEdit} />
             ) : (
               <div className="db-loading">본문을 불러오는 중…</div>
             )}

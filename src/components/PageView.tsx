@@ -5,6 +5,7 @@ import { useAutosave, type SaveState } from '../useAutosave';
 import { Editor } from './Editor';
 import { CoverPicker, EmojiPicker, randomCover, randomEmoji } from './Pickers';
 import { DatabaseView } from './database/DatabaseView';
+import { EDIT, MANAGE } from '../roles';
 
 export type { SaveState };
 
@@ -21,9 +22,10 @@ type Props = {
   onPagesChanged: () => void;
   // 다른 사람이 바꾼 제목·아이콘·커버를 받아오는 최신 목록 값
   meta?: PageMeta;
+  onLock: (id: string, locked: boolean) => void;
 };
 
-export function PageView({ page, dark, width, autoFocusTitle, onMetaChange, onSaveState, onError, dataVersion, onPagesChanged, meta }: Props) {
+export function PageView({ page, dark, width, autoFocusTitle, onMetaChange, onSaveState, onError, dataVersion, onPagesChanged, meta, onLock }: Props) {
   const [title, setTitle] = useState(page.title);
   const [icon, setIcon] = useState(page.icon);
   const [cover, setCover] = useState(page.cover);
@@ -32,6 +34,12 @@ export function PageView({ page, dark, width, autoFocusTitle, onMetaChange, onSa
 
   const pageId = page.id;
   const isDb = page.kind === 'database';
+  // 내 권한 (목록에서 받은 최신 값을 먼저 본다)
+  const access = meta?.access ?? page.access ?? MANAGE;
+  const canEdit = access >= EDIT;
+  const lockedAny = meta?.lockedAny ?? page.lockedAny ?? false;
+  const ownLocked = meta?.locked ?? page.locked;
+  const isPrivate = meta?.private ?? page.private;
   const { queue } = useAutosave(pageId, onSaveState, onError);
 
   // 긴 제목은 줄바꿈해서 보여 준다
@@ -78,7 +86,7 @@ export function PageView({ page, dark, width, autoFocusTitle, onMetaChange, onSa
     <div className={cover ? 'has-cover' : ''}>
       {cover && (
         <div className="cover" style={coverStyle}>
-          <div className="cover-tools">
+          <div className="cover-tools" hidden={!canEdit}>
             <button className="chip" onClick={(e) => setCoverAnchor(e.currentTarget)}>커버 바꾸기</button>
           </div>
         </div>
@@ -86,13 +94,23 @@ export function PageView({ page, dark, width, autoFocusTitle, onMetaChange, onSa
 
       <div className={`page ${isDb ? 'full' : width}`}>
         <div className="page-head">
+          {!canEdit && (
+            <div className="readonly-banner">
+              {lockedAny ? <><b>🔒 관리자만 고칠 수 있는 문서예요.</b> 지금은 보기만 할 수 있어요.</> : <><b>👁 보기 전용이에요.</b> 고치려면 관리자에게 권한을 받아 주세요.</>}
+            </div>
+          )}
           {icon && (
-            <button className="page-icon" onClick={(e) => setEmojiAnchor(e.currentTarget)} title="아이콘 바꾸기">
+            <button className="page-icon" disabled={!canEdit} onClick={(e) => setEmojiAnchor(e.currentTarget)} title="아이콘 바꾸기">
               {icon}
             </button>
           )}
           <div className="page-head-tools">
-            {!icon && (
+            {access >= MANAGE && !isPrivate && (
+              <button className="btn ghost" onClick={() => onLock(pageId, !ownLocked)} title="켜면 관리자만 이 문서와 하위 문서를 고칠 수 있어요">
+                {ownLocked ? '🔓 잠금 풀기' : '🔒 관리자만 편집'}
+              </button>
+            )}
+            {canEdit && !icon && (
               <button
                 className="btn ghost"
                 onClick={() => {
@@ -104,7 +122,7 @@ export function PageView({ page, dark, width, autoFocusTitle, onMetaChange, onSa
                 😊 아이콘 추가
               </button>
             )}
-            {!cover && (
+            {canEdit && !cover && (
               <button
                 className="btn ghost"
                 onClick={() => {
@@ -121,6 +139,7 @@ export function PageView({ page, dark, width, autoFocusTitle, onMetaChange, onSa
             ref={titleRef}
             rows={1}
             className="title-input"
+            readOnly={!canEdit}
             value={title}
             placeholder="제목 없음"
             autoFocus={autoFocusTitle}
@@ -146,9 +165,10 @@ export function PageView({ page, dark, width, autoFocusTitle, onMetaChange, onSa
             onSaveState={onSaveState}
             onError={onError}
             onPagesChanged={onPagesChanged}
+            access={access}
           />
         ) : (
-          <Editor pageId={pageId} dark={dark} />
+          <Editor pageId={pageId} dark={dark} readOnly={!canEdit} />
         )}
       </div>
 

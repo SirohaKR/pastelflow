@@ -103,6 +103,8 @@ export default function App() {
       reloadPages().catch(() => {});
       reloadSpaces();
       api.users().then(setUsers).catch(() => {});
+      // 관리자가 내 역할을 바꿨을 수도 있으니 내 정보도 새로
+      api.authStatus().then((s) => s.user && setAuth({ setup: false, user: s.user })).catch(() => {});
     }, 300);
   }, [reloadPages, reloadSpaces]);
   const viewers = useLive(authed, currentId, onRemoteChange);
@@ -241,6 +243,18 @@ export default function App() {
     }
   };
 
+  // 관리자만 편집 잠금 (하위 페이지 권한도 바뀌므로 다시 불러온다)
+  const lock = async (id: string, locked: boolean) => {
+    patchMeta(id, { locked });
+    try {
+      await api.updatePage(id, { locked });
+      await reloadPages();
+    } catch (e) {
+      showError((e as Error).message);
+      reloadPages();
+    }
+  };
+
   const favorite = async (id: string, fav: boolean) => {
     patchMeta(id, { favorite: fav });
     api.updatePage(id, { favorite: fav }).catch((e) => showError(e.message));
@@ -331,6 +345,7 @@ export default function App() {
         onMembers={() => setDialog('members')}
         spaces={spaces}
         onMoveTo={moveTo}
+        onLock={lock}
         onNewSpace={() => setSpaceDialog({ space: null })}
         onSpaceSettings={(s) => setSpaceDialog({ space: s })}
         onLeaveSpace={async (s) => {
@@ -398,6 +413,7 @@ export default function App() {
               dataVersion={dataVersion}
               onPagesChanged={reloadPages}
               meta={pages.find((p) => p.id === page.id)}
+              onLock={lock}
             />
           ) : !currentId ? (
             widgetId ? (

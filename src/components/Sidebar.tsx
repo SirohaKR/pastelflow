@@ -4,6 +4,7 @@ import { childrenOf, displayTitle, dotColor, isInSubtree, type DropZone } from '
 import { Popover } from './Popover';
 import { Avatar } from './Account';
 import './spaces.css';
+import { DELETE, EDIT, MANAGE, scopeLevel } from '../roles';
 
 type Props = {
   pages: PageMeta[];
@@ -30,6 +31,8 @@ type Props = {
   onNewSpace: () => void;
   onSpaceSettings: (space: Space) => void;
   onLeaveSpace: (space: Space) => void;
+  // 관리자만 편집 잠금 켜고 끄기
+  onLock: (id: string, locked: boolean) => void;
 };
 
 // 사이드바 구역 하나: 전체 공용, 스페이스들, 내 페이지
@@ -54,6 +57,9 @@ export function Sidebar(props: Props) {
   const favorites = pages.filter((p) => p.favorite && p.deletedAt == null);
   const roots = childrenOf(pages, null);
   const isMac = navigator.platform.toLowerCase().includes('mac');
+  const level = (scope: Scope) => scopeLevel(props.me, spaces, scope);
+  // 전체 공용에 만들 권한이 없으면 위쪽 '새 페이지'는 내 페이지에 만든다
+  const topScope: Scope = level({}) >= EDIT ? {} : { private: true };
 
   const sections: Section[] = [
     { key: 'shared', label: '👥 전체 공용', hint: '모든 멤버가 함께 보는 페이지를 여기에 만들어요.', scope: {}, roots: [] },
@@ -82,7 +88,7 @@ export function Sidebar(props: Props) {
   // 구역 이름 위로 끌어 놓으면 그 구역 맨 위로 옮긴다
   const sectionDrop = (s: Section) => ({
     onDragOver: (e: DragEvent) => {
-      if (!dragId) return;
+      if (!dragId || level(s.scope) < EDIT) return;
       e.preventDefault();
       setOverSection(s.key);
     },
@@ -110,8 +116,8 @@ export function Sidebar(props: Props) {
         <button className="side-action" onClick={props.onSearch}>
           🔍 검색 <kbd>{isMac ? '⌘' : 'Ctrl'} K</kbd>
         </button>
-        <button className="side-action" onClick={() => onCreate(null)}>➕ 새 페이지</button>
-        <button className="side-action" onClick={() => onCreate(null, 'database')}>🗃️ 새 데이터베이스</button>
+        <button className="side-action" onClick={() => onCreate(null, 'page', topScope)}>➕ 새 페이지</button>
+        <button className="side-action" onClick={() => onCreate(null, 'database', topScope)}>🗃️ 새 데이터베이스</button>
       </div>
 
       <div className="side-scroll">
@@ -132,12 +138,15 @@ export function Sidebar(props: Props) {
                 <button className="side-fold" onClick={() => toggleFold(s.key)} title={isFolded ? '펼치기' : '접기'}>
                   <span className={`fold-arrow ${isFolded ? '' : 'open'}`}>▶</span>
                   <span className="side-label-text" title={s.space ? `${s.space.members.length}명` : s.hint}>{s.label}</span>
+                  {level(s.scope) < EDIT && <span className="tree-lock" title="보기 전용">👁</span>}
                 </button>
                 <span className="side-label-tools">
                   {s.space && (
                     <button className="icon-btn" title="스페이스 메뉴" onClick={(e) => setSpaceMenu({ anchor: e.currentTarget, space: s.space! })}>⋯</button>
                   )}
-                  <button className="icon-btn" title="페이지 추가" onClick={() => onCreate(null, 'page', s.scope)}>+</button>
+                  {level(s.scope) >= EDIT && (
+                    <button className="icon-btn" title="페이지 추가" onClick={() => onCreate(null, 'page', s.scope)}>+</button>
+                  )}
                 </span>
               </div>
               {!isFolded && (
@@ -169,8 +178,12 @@ export function Sidebar(props: Props) {
       {spaceMenu && (
         <Popover anchor={spaceMenu.anchor} onClose={() => setSpaceMenu(null)}>
           <div className="menu">
-            <button onClick={() => { onCreate(null, 'page', { spaceId: spaceMenu.space.id }); setSpaceMenu(null); }}>➕ 페이지 추가</button>
-            <button onClick={() => { onCreate(null, 'database', { spaceId: spaceMenu.space.id }); setSpaceMenu(null); }}>🗃️ 데이터베이스 추가</button>
+            {level({ spaceId: spaceMenu.space.id }) >= EDIT && (
+              <>
+                <button onClick={() => { onCreate(null, 'page', { spaceId: spaceMenu.space.id }); setSpaceMenu(null); }}>➕ 페이지 추가</button>
+                <button onClick={() => { onCreate(null, 'database', { spaceId: spaceMenu.space.id }); setSpaceMenu(null); }}>🗃️ 데이터베이스 추가</button>
+              </>
+            )}
             <button onClick={() => { props.onSpaceSettings(spaceMenu.space); setSpaceMenu(null); }}>
               {canManage(spaceMenu.space) ? '⚙ 스페이스 설정·멤버' : '👥 멤버 보기'}
             </button>
@@ -199,8 +212,11 @@ function TreeNode(props: NodeProps) {
   const open = expanded.has(page.id);
   // 데이터베이스는 하위 페이지 대신 행을 가진다
   const isDb = page.kind === 'database';
+  // 이 페이지에서 내 권한 단계 (잠긴 문서는 관리자가 아니면 보기만)
+  const acc = page.access ?? MANAGE;
+  const canEdit = acc >= EDIT;
 
-  const canDrop = !flat && dragId && dragId !== page.id && !isInSubtree(pages, dragId, page.id);
+  const canDrop = !flat && canEdit && dragId && dragId !== page.id && !isInSubtree(pages, dragId, page.id);
 
   const onDragOver = (e: DragEvent<HTMLDivElement>) => {
     if (!canDrop) return;
@@ -225,7 +241,7 @@ function TreeNode(props: NodeProps) {
     { label: '👥 전체 공용', scope: {} },
     ...spaces.map((s) => ({ label: `${s.icon || '#'} ${s.name}`, scope: { spaceId: s.id } })),
     { label: '🔒 내 페이지', scope: { private: true } },
-  ].filter((d) => page.parentId || !sameScope(page, d.scope));
+  ].filter((d) => (page.parentId || !sameScope(page, d.scope)) && scopeLevel(props.me, spaces, d.scope) >= EDIT);
 
   return (
     <>
@@ -237,7 +253,7 @@ function TreeNode(props: NodeProps) {
           (menuAnchor || moveAnchor) && 'menu-open',
         ].filter(Boolean).join(' ')}
         style={{ paddingLeft: 4 + depth * 16 }}
-        draggable={!flat}
+        draggable={!flat && canEdit}
         onDragStart={(e) => {
           e.dataTransfer.effectAllowed = 'move';
           setDragId(page.id);
@@ -263,10 +279,11 @@ function TreeNode(props: NodeProps) {
             <span className="tree-dot" style={{ background: dotColor(page.id) }} />
           )}
           <span className={`tree-title ${page.title.trim() ? '' : 'untitled'}`}>{displayTitle(page)}</span>
+          {page.locked && <span className="tree-lock" title="관리자만 편집">🔒</span>}
         </button>
         <div className="tree-tools">
           <button className="icon-btn" title="더 보기" onClick={(e) => setMenuAnchor(e.currentTarget)}>⋯</button>
-          {!flat && !isDb && (
+          {!flat && !isDb && canEdit && (
             <button
               className="icon-btn"
               title="하위 페이지 추가"
@@ -292,7 +309,7 @@ function TreeNode(props: NodeProps) {
             >
               {page.favorite ? '☆ 즐겨찾기 해제' : '⭐ 즐겨찾기에 추가'}
             </button>
-            {!isDb && (
+            {!isDb && canEdit && (
               <>
                 <button
                   onClick={() => {
@@ -314,14 +331,16 @@ function TreeNode(props: NodeProps) {
                 </button>
               </>
             )}
-            <button
-              onClick={() => {
-                setMoveAnchor(menuAnchor);
-                setMenuAnchor(null);
-              }}
-            >
-              📦 다른 곳으로 옮기기
-            </button>
+            {canEdit && destinations.length > 0 && (
+              <button
+                onClick={() => {
+                  setMoveAnchor(menuAnchor);
+                  setMenuAnchor(null);
+                }}
+              >
+                📦 다른 곳으로 옮기기
+              </button>
+            )}
             <button
               onClick={() => {
                 props.onDuplicate(page.id);
@@ -330,15 +349,27 @@ function TreeNode(props: NodeProps) {
             >
               📄 복사본 만들기
             </button>
-            <button
-              className="danger"
-              onClick={() => {
-                props.onTrash(page.id);
-                setMenuAnchor(null);
-              }}
-            >
-              🗑️ 휴지통으로 옮기기
-            </button>
+            {acc >= MANAGE && !page.private && (
+              <button
+                onClick={() => {
+                  props.onLock(page.id, !page.locked);
+                  setMenuAnchor(null);
+                }}
+              >
+                {page.locked ? '🔓 잠금 풀기 (모두 편집)' : '🔒 관리자만 편집'}
+              </button>
+            )}
+            {acc >= DELETE && (
+              <button
+                className="danger"
+                onClick={() => {
+                  props.onTrash(page.id);
+                  setMenuAnchor(null);
+                }}
+              >
+                🗑️ 휴지통으로 옮기기
+              </button>
+            )}
           </div>
         </Popover>
       )}
