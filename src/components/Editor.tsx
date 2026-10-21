@@ -1,10 +1,17 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type MouseEvent } from 'react';
 import {
+  BlockColorsItem,
+  DragHandleMenu,
   FormattingToolbar,
   FormattingToolbarController,
   getDefaultReactSlashMenuItems,
   getFormattingToolbarItems,
+  RemoveBlockItem,
+  SideMenu,
+  SideMenuController,
   SuggestionMenuController,
+  TableColumnHeaderItem,
+  TableRowHeaderItem,
   useCreateBlockNote,
 } from '@blocknote/react';
 import { filterSuggestionItems } from '@blocknote/core';
@@ -21,7 +28,7 @@ import { APP_VERSION, CLIENT_ID, CURSOR_COLORS, useMe, wsUrl } from '../session'
 import { editorSchema } from '../../server/shared/editorSchema.js';
 import { guessLanguage, syntaxHighlighter } from '../codeHighlight';
 import { watchFonts } from '../fonts';
-import { FontButton } from './FontButton';
+import { BlockFontItem, FontButton } from './FontButton';
 
 // 클립보드에 글 넣기 (http 로 접속하면 navigator.clipboard 가 없어서 예전 방식으로)
 async function copyText(text: string) {
@@ -100,6 +107,19 @@ export function Editor({ pageId, dark, readOnly = false }: Props) {
       {!online && <div className="editor-offline">⚠ 연결이 끊겼어요. 다시 연결되면 고친 내용이 자동으로 합쳐져요.</div>}
       <CollabEditor key={pageId} conn={conn} dark={dark} me={me} readOnly={readOnly} />
     </>
+  );
+}
+
+// 블록 손잡이(⠿) 메뉴: 기본 항목 + 글꼴
+function BlockMenu() {
+  return (
+    <DragHandleMenu>
+      <RemoveBlockItem>삭제</RemoveBlockItem>
+      <BlockColorsItem>색깔</BlockColorsItem>
+      <BlockFontItem />
+      <TableRowHeaderItem>행 제목</TableRowHeaderItem>
+      <TableColumnHeaderItem>열 제목</TableColumnHeaderItem>
+    </DragHandleMenu>
   );
 }
 
@@ -226,7 +246,8 @@ function CollabEditor({ conn, dark, me, readOnly }: { conn: Conn; dark: boolean;
           {copied ? '✓ 복사됨' : '⧉ 복사'}
         </button>
       )}
-      <BlockNoteView editor={editor} theme={dark ? 'dark' : 'light'} editable={!readOnly} slashMenu={false} formattingToolbar={false}>
+      <BlockNoteView editor={editor} theme={dark ? 'dark' : 'light'} editable={!readOnly} slashMenu={false} formattingToolbar={false} sideMenu={false}>
+        <SideMenuController sideMenu={(props) => <SideMenu {...props} dragHandleMenu={BlockMenu} />} />
         <FormattingToolbarController
           formattingToolbar={() => (
             <FormattingToolbar>
