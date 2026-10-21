@@ -260,9 +260,28 @@ button { cursor: pointer; }
 }
 .editor-wrap .bn-editor { padding-inline: 54px; font-size: 16px; line-height: 1.7; }
 .editor-wrap .bn-block-content[data-content-type='heading'] { font-weight: 750; }
-.editor-wrap .bn-inline-content code,
-.editor-wrap code { background: var(--accent-soft); color: var(--accent-ink); border-radius: 5px; padding: 1px 5px; }
-.editor-wrap [data-content-type='codeBlock'] { border-radius: 12px; }
+/* 줄 안 코드만 파스텔로 (코드 블록은 아래에서 어두운 바탕) */
+.editor-wrap :not(pre) > code { background: var(--accent-soft); color: var(--accent-ink); border-radius: 5px; padding: 1px 5px; }
+
+/* ── 코드 블록: 앱 테마와 상관없이 어두운 바탕 + 색 강조 (One Dark) ── */
+.editor-wrap { position: relative; }
+.editor-wrap .bn-block-content[data-content-type='codeBlock'] { background-color: #282c34; color: #abb2bf; border-radius: 10px; }
+.editor-wrap .bn-block-content[data-content-type='codeBlock'] > pre {
+  --bn-suggestion-surface: #282c34;
+  padding: 40px 20px 18px; tab-size: 2;
+  font: 14px/1.65 'D2Coding', 'JetBrains Mono', Consolas, 'Malgun Gothic', monospace;
+}
+.editor-wrap .bn-block-content[data-content-type='codeBlock'] > div > select {
+  opacity: 0.8; top: 10px; left: 16px; font-size: 13px; font-weight: 600; color: #d7dae0; transition: none;
+}
+.editor-wrap .bn-block-content[data-content-type='codeBlock']:hover > div > select { opacity: 1; }
+.editor-wrap .bn-block-content[data-content-type='codeBlock'] > div > select:disabled { cursor: default; }
+.code-copy {
+  position: absolute; z-index: 5; border: 0; border-radius: 8px; padding: 4px 10px;
+  font-size: 12px; background: rgb(255 255 255 / 0.1); color: #d7dae0;
+}
+.code-copy:hover { background: rgb(255 255 255 / 0.18); }
+.code-copy.done { background: #98c379; color: #282c34; }
 .editor-wrap a { color: var(--accent-ink); text-decoration-color: var(--accent); text-underline-offset: 3px; }
 .editor-wrap [data-content-type='checkListItem'] input[type='checkbox'] { accent-color: var(--accent-ink); }
 .editor-wrap [data-content-type='quote'] blockquote,

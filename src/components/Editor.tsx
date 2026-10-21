@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
+import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type MouseEvent } from 'react';
 import { getDefaultReactSlashMenuItems, SuggestionMenuController, useCreateBlockNote } from '@blocknote/react';
 import { filterSuggestionItems } from '@blocknote/core';
 import { TextSelection } from '@tiptap/pm/state';
@@ -12,6 +12,24 @@ import '@blocknote/mantine/style.css';
 import { api, type User } from '../api';
 import { CLIENT_ID, CURSOR_COLORS, useMe, wsUrl } from '../session';
 import { editorSchema } from '../../server/shared/editorSchema.js';
+import { guessLanguage, syntaxHighlighter } from '../codeHighlight';
+
+// 클립보드에 글 넣기 (http 로 접속하면 navigator.clipboard 가 없어서 예전 방식으로)
+async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return;
+  } catch {
+    /* 예전 방식으로 */
+  }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand('copy');
+  ta.remove();
+}
 
 const dictionary = {
   ...ko,
@@ -82,6 +100,8 @@ function CollabEditor({ conn, dark, me, readOnly }: { conn: Conn; dark: boolean;
     withCollaboration({
       schema: editorSchema,
       dictionary,
+      // 코드 블록 색 강조
+      extensions: [syntaxHighlighter],
       uploadFile: async (file: File) => (await api.upload(file)).url,
       collaboration: {
         provider: { awareness: conn.provider.awareness ?? undefined },
@@ -127,16 +147,73 @@ function CollabEditor({ conn, dark, me, readOnly }: { conn: Conn; dark: boolean;
     insertFiles([...e.dataTransfer.files]);
   };
 
+  // 언어를 아직 안 고른 코드 블록에 코드를 붙여 넣으면 언어를 알아맞혀서 색을 입힌다
+  const guessAfterPaste = () => {
+    let block;
+    try {
+      block = editor.getTextCursorPosition().block;
+    } catch {
+      return;
+    }
+    if (block.type !== 'codeBlock' || block.props.language !== 'text') return;
+    const id = block.id;
+    window.setTimeout(() => {
+      const cur = editor.getBlock(id);
+      if (!cur || cur.type !== 'codeBlock' || cur.props.language !== 'text') return;
+      const text = (Array.isArray(cur.content) ? cur.content : []).map((c) => ('text' in c ? c.text : '')).join('');
+      const lang = guessLanguage(text);
+      if (lang) editor.updateBlock(id, { props: { language: lang } });
+    }, 0);
+  };
+
   // 표 칸에서 파일을 붙여 넣어도 칸 안에 첨부로
   const onPasteCapture = (e: ClipboardEvent) => {
+    if (!readOnly && !e.clipboardData?.files.length) guessAfterPaste();
     if (readOnly || !e.clipboardData?.files.length || !inTableCell(window.getSelection()?.anchorNode ?? null)) return;
     e.preventDefault();
     e.stopPropagation();
     insertFiles([...e.clipboardData.files]);
   };
 
+  // 마우스를 올린 코드 블록 오른쪽 위에 복사 버튼
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [codeHover, setCodeHover] = useState<{ el: HTMLElement; top: number; right: number } | null>(null);
+  const [copied, setCopied] = useState(false);
+  const onMouseMove = (e: MouseEvent) => {
+    const t = e.target as HTMLElement;
+    if (t.closest('.code-copy')) return;
+    const el = t.closest<HTMLElement>('.bn-block-content[data-content-type="codeBlock"]');
+    if (!el || !wrapRef.current) {
+      if (codeHover) setCodeHover(null);
+      return;
+    }
+    if (codeHover?.el === el) return;
+    const w = wrapRef.current.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    setCopied(false);
+    setCodeHover({ el, top: r.top - w.top + 8, right: w.right - r.right + 10 });
+  };
+  const copyCode = async () => {
+    if (!codeHover) return;
+    await copyText(codeHover.el.querySelector('pre code')?.textContent ?? '');
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  };
+
   return (
-    <div className="editor-wrap" onDropCapture={onDropCapture} onPasteCapture={onPasteCapture}>
+    <div
+      ref={wrapRef}
+      className="editor-wrap"
+      onDropCapture={onDropCapture}
+      onPasteCapture={onPasteCapture}
+      onMouseMove={onMouseMove}
+      onMouseLeave={() => setCodeHover(null)}
+    >
+      {codeHover && (
+        <button className={`code-copy ${copied ? 'done' : ''}`} style={{ top: codeHover.top, right: codeHover.right }} onClick={copyCode} title="코드 복사">
+          {copied ? '✓ 복사됨' : '⧉ 복사'}
+        </button>
+      )}
       <BlockNoteView editor={editor} theme={dark ? 'dark' : 'light'} editable={!readOnly} slashMenu={false}>
         <SuggestionMenuController
           triggerCharacter="/"

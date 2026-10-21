@@ -1,4 +1,4 @@
-import { BlockNoteSchema, createInlineContentSpec, defaultInlineContentSpecs } from '@blocknote/core';
+import { BlockNoteSchema, createCodeBlockSpec, createInlineContentSpec, defaultBlockSpecs, defaultInlineContentSpecs } from '@blocknote/core';
 
 // 문서 에디터 스키마. 화면(src/components/Editor.tsx)과 서버(server/realtime.js)가 같이 쓴다.
 // 서버도 같은 스키마로 Yjs ↔ JSON 을 바꿔야 새 요소가 저장 중에 사라지지 않는다.
@@ -61,6 +61,50 @@ export const Attachment = createInlineContentSpec(
   },
 );
 
+// 코드 블록 언어 (id 는 색 강조기 Shiki 의 언어 이름, 화면 src/codeHighlight.ts 와 같아야 한다)
+export const CODE_LANGUAGES = {
+  text: { name: '일반 텍스트', aliases: ['text', 'txt', 'plain', 'plaintext'] },
+  dart: { name: 'Dart', aliases: ['dart', 'flutter'] },
+  kotlin: { name: 'Kotlin', aliases: ['kotlin', 'kt', 'kts'] },
+  swift: { name: 'Swift', aliases: ['swift'] },
+  java: { name: 'Java', aliases: ['java'] },
+  javascript: { name: 'JavaScript', aliases: ['javascript', 'js', 'mjs', 'cjs'] },
+  typescript: { name: 'TypeScript', aliases: ['typescript', 'ts', 'mts'] },
+  jsx: { name: 'JSX', aliases: ['jsx'] },
+  tsx: { name: 'TSX', aliases: ['tsx'] },
+  json: { name: 'JSON', aliases: ['json'] },
+  html: { name: 'HTML', aliases: ['html', 'htm'] },
+  css: { name: 'CSS', aliases: ['css'] },
+  scss: { name: 'SCSS', aliases: ['scss'] },
+  vue: { name: 'Vue', aliases: ['vue'] },
+  svelte: { name: 'Svelte', aliases: ['svelte'] },
+  python: { name: 'Python', aliases: ['python', 'py'] },
+  c: { name: 'C', aliases: ['c', 'h'] },
+  cpp: { name: 'C++', aliases: ['cpp', 'c++', 'hpp', 'cc'] },
+  csharp: { name: 'C#', aliases: ['csharp', 'cs', 'c#'] },
+  go: { name: 'Go', aliases: ['go', 'golang'] },
+  rust: { name: 'Rust', aliases: ['rust', 'rs'] },
+  php: { name: 'PHP', aliases: ['php'] },
+  ruby: { name: 'Ruby', aliases: ['ruby', 'rb'] },
+  lua: { name: 'Lua', aliases: ['lua'] },
+  sql: { name: 'SQL', aliases: ['sql'] },
+  graphql: { name: 'GraphQL', aliases: ['graphql', 'gql'] },
+  shellscript: { name: 'Shell (bash)', aliases: ['shellscript', 'bash', 'sh', 'shell', 'zsh'] },
+  powershell: { name: 'PowerShell', aliases: ['powershell', 'ps1', 'ps'] },
+  bat: { name: 'Batch (cmd)', aliases: ['bat', 'cmd', 'batch'] },
+  dockerfile: { name: 'Dockerfile', aliases: ['dockerfile', 'docker'] },
+  yaml: { name: 'YAML', aliases: ['yaml', 'yml'] },
+  toml: { name: 'TOML', aliases: ['toml'] },
+  ini: { name: 'INI', aliases: ['ini', 'properties', 'env'] },
+  xml: { name: 'XML', aliases: ['xml'] },
+  markdown: { name: 'Markdown', aliases: ['markdown', 'md'] },
+  diff: { name: 'Diff', aliases: ['diff', 'patch'] },
+};
+
 export const editorSchema = BlockNoteSchema.create({
+  blockSpecs: {
+    ...defaultBlockSpecs,
+    codeBlock: createCodeBlockSpec({ indentLineWithTab: true, defaultLanguage: 'text', supportedLanguages: CODE_LANGUAGES }),
+  },
   inlineContentSpecs: { ...defaultInlineContentSpecs, attachment: Attachment },
 });
