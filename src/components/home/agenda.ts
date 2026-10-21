@@ -58,12 +58,19 @@ export function onDay(item: AgendaItem, key: string) {
   return item.date === key;
 }
 
-// 새 할 일을 넣을 때 쓸 초기 속성 (날짜 속성에 그 날짜)
-export function newItemProps(db: AgendaDb, date: string): Props {
+const personProps = (db: AgendaDb) => db.schema.properties.filter((p) => p.type === 'person');
+
+// 홈에서 새 할 일을 넣을 수 있는 데이터베이스.
+// 공용·스페이스 데이터베이스는 담당자 속성이 있어야 한다 (내 담당으로 넣어야 홈에 보이니까)
+export const addTargets = (dbs: AgendaDb[]) => dbs.filter((db) => !db.shared || personProps(db).length > 0);
+
+// 새 할 일을 넣을 때 쓸 초기 속성 (날짜 속성에 그 날짜, 공용이면 담당자에 나)
+export function newItemProps(db: AgendaDb, date: string | null, me: string | undefined): Props {
   const dateProp = defaultDateProp(db.schema);
   const endProp = timelineProps(db.schema).end;
   const props: Props = {};
-  if (dateProp) props[dateProp.id] = date;
-  if (endProp) props[endProp.id] = date;
+  if (date && dateProp) props[dateProp.id] = date;
+  if (date && endProp) props[endProp.id] = date;
+  if (db.shared && me) for (const p of personProps(db)) props[p.id] = [me];
   return props;
 }

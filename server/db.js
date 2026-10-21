@@ -412,9 +412,16 @@ export function createRepo(db) {
     allDatabases(uid) {
       const dbs = db.prepare(`SELECT * FROM pages WHERE kind = 'database' AND deleted_at IS NULL
         AND ${VISIBLE_SQL} ORDER BY position, created_at`).all(uid, uid);
+      // 내 페이지의 데이터베이스는 전부, 전체 공용·스페이스의 데이터베이스는 내가 담당자인 항목만
       return dbs.map((row) => {
         const page = toPage(row, true);
-        return { id: page.id, title: page.title, icon: page.icon, schema: page.schema, rows: stmt.rows.all(page.id).map(toRow) };
+        const shared = !row.private_owner;
+        let rows = stmt.rows.all(page.id).map(toRow);
+        if (shared) {
+          const people = (page.schema?.properties ?? []).filter((p) => p.type === 'person').map((p) => p.id);
+          rows = rows.filter((r) => people.some((id) => Array.isArray(r.props?.[id]) && r.props[id].includes(uid)));
+        }
+        return { id: page.id, title: page.title, icon: page.icon, schema: page.schema, shared, rows };
       });
     },
 

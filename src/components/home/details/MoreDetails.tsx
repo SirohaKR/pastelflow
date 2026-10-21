@@ -1,7 +1,8 @@
 import { useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { addDays, diffDays, formatDate, parseKey, toKey, todayKey } from '../../../database';
 import { ancestors, displayTitle, dotColor, timeAgo } from '../../../tree';
-import { flattenAgenda, newItemProps, onDay, type AgendaItem } from '../agenda';
+import { addTargets, flattenAgenda, newItemProps, onDay, type AgendaItem } from '../agenda';
+import { useMe } from '../../../session';
 import { uid, type HomeCtx, type WidgetProps } from '../meta';
 import {
   ddayLabel, ddayTarget, habitColor, longestStreak, sortDdays, streak, tagAt, TAGS, trimLog,
@@ -102,7 +103,9 @@ export function TodoDetail({ ctx, config, setConfig }: WidgetProps<{ dbId?: stri
   const [title, setTitle] = useState('');
   const [date, setDate] = useState(today);
   const [showDone, setShowDone] = useState(false);
-  const target = ctx.agenda.find((d) => d.id === config.dbId) ?? ctx.agenda[0];
+  const me = useMe();
+  const targets = addTargets(ctx.agenda);
+  const target = targets.find((d) => d.id === config.dbId) ?? targets[0];
 
   if (!ctx.agenda.length) return <NoDb />;
 
@@ -120,7 +123,7 @@ export function TodoDetail({ ctx, config, setConfig }: WidgetProps<{ dbId?: stri
   const add = async (e: FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !target) return;
-    await ctx.addRow(target.id, title.trim(), date ? newItemProps(target, date) : {});
+    await ctx.addRow(target.id, title.trim(), newItemProps(target, date || null, me?.id));
     setTitle('');
   };
 
@@ -130,7 +133,7 @@ export function TodoDetail({ ctx, config, setConfig }: WidgetProps<{ dbId?: stri
         <input className="field small grow" placeholder="할 일을 적고 Enter" value={title} onChange={(e) => setTitle(e.target.value)} />
         <input className="field small" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         <select className="field small" value={target?.id} onChange={(e) => setConfig({ ...config, dbId: e.target.value })} title="넣을 데이터베이스">
-          {ctx.agenda.map((d) => <option key={d.id} value={d.id}>{d.icon} {d.title || '제목 없음'}</option>)}
+          {targets.map((d) => <option key={d.id} value={d.id}>{d.icon} {d.title || '제목 없음'}</option>)}
         </select>
         <button className="btn">＋ 추가</button>
         <label className="dt-toggle"><input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> 완료한 일도 보기</label>
@@ -158,7 +161,9 @@ export function CalendarDetail({ ctx, config, setConfig }: WidgetProps<{ dbId?: 
   });
   const [adding, setAdding] = useState<string | null>(null);
   const [title, setTitle] = useState('');
-  const target = ctx.agenda.find((d) => d.id === config.dbId) ?? ctx.agenda[0];
+  const me = useMe();
+  const targets = addTargets(ctx.agenda);
+  const target = targets.find((d) => d.id === config.dbId) ?? targets[0];
 
   const cells = useMemo(() => {
     const start = new Date(month);
@@ -177,7 +182,7 @@ export function CalendarDetail({ ctx, config, setConfig }: WidgetProps<{ dbId?: 
 
   const add = async (e: FormEvent, key: string) => {
     e.preventDefault();
-    if (title.trim() && target) await ctx.addRow(target.id, title.trim(), newItemProps(target, key));
+    if (title.trim() && target) await ctx.addRow(target.id, title.trim(), newItemProps(target, key, me?.id));
     setTitle('');
     setAdding(null);
   };
@@ -193,7 +198,7 @@ export function CalendarDetail({ ctx, config, setConfig }: WidgetProps<{ dbId?: 
         </div>
         <label className="view-setting">새 일정 넣을 곳
           <select className="field small inline" value={target?.id} onChange={(e) => setConfig({ ...config, dbId: e.target.value })}>
-            {ctx.agenda.map((d) => <option key={d.id} value={d.id}>{d.icon} {d.title || '제목 없음'}</option>)}
+            {targets.map((d) => <option key={d.id} value={d.id}>{d.icon} {d.title || '제목 없음'}</option>)}
           </select>
         </label>
       </div>

@@ -2,7 +2,8 @@ import { useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'reac
 import type { Widget } from '../../api';
 import { addDays, diffDays, formatDate, parseKey, toKey, todayKey } from '../../database';
 import { displayTitle, dotColor, timeAgo } from '../../tree';
-import { flattenAgenda, newItemProps, onDay, type AgendaItem } from './agenda';
+import { addTargets, flattenAgenda, newItemProps, onDay, type AgendaItem } from './agenda';
+import { useMe } from '../../session';
 import { uid, type HomeCtx, type WidgetProps } from './meta';
 import {
   catsOf, ddayLabel, ddayTarget, habitColor, normalizeUrl, sortDdays, streak, tagAt, trimLog, won,
@@ -75,7 +76,9 @@ function TodoWidget({ ctx, config, setConfig }: WidgetProps<TodoConfig>) {
   const items = useAgenda(ctx);
   const [title, setTitle] = useState('');
   const today = todayKey();
-  const target = ctx.agenda.find((d) => d.id === config.dbId) ?? ctx.agenda[0];
+  const me = useMe();
+  const targets = addTargets(ctx.agenda);
+  const target = targets.find((d) => d.id === config.dbId) ?? targets[0];
 
   const list = items
     .filter((i) => onDay(i, today) || (i.date && (i.end ?? i.date) < today && !i.done && i.doneProps))
@@ -84,7 +87,7 @@ function TodoWidget({ ctx, config, setConfig }: WidgetProps<TodoConfig>) {
   const add = async (e: FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !target) return;
-    await ctx.addRow(target.id, title.trim(), newItemProps(target, today));
+    await ctx.addRow(target.id, title.trim(), newItemProps(target, today, me?.id));
     setTitle('');
   };
 
@@ -113,14 +116,16 @@ function TodoWidget({ ctx, config, setConfig }: WidgetProps<TodoConfig>) {
           </li>
         ))}
       </ul>
-      <form className="w-add" onSubmit={add}>
-        <input className="field small" placeholder="＋ 오늘 할 일 추가" value={title} onChange={(e) => setTitle(e.target.value)} />
-        {ctx.agenda.length > 1 && (
-          <select className="field small" value={target?.id} onChange={(e) => setConfig({ ...config, dbId: e.target.value })} title="어느 데이터베이스에 넣을까요">
-            {ctx.agenda.map((d) => <option key={d.id} value={d.id}>{d.icon} {d.title || '제목 없음'}</option>)}
-          </select>
-        )}
-      </form>
+      {target && (
+        <form className="w-add" onSubmit={add}>
+          <input className="field small" placeholder="＋ 오늘 할 일 추가" value={title} onChange={(e) => setTitle(e.target.value)} />
+          {targets.length > 1 && (
+            <select className="field small" value={target.id} onChange={(e) => setConfig({ ...config, dbId: e.target.value })} title="어느 데이터베이스에 넣을까요">
+              {targets.map((d) => <option key={d.id} value={d.id}>{d.icon} {d.title || '제목 없음'}</option>)}
+            </select>
+          )}
+        </form>
+      )}
     </div>
   );
 }

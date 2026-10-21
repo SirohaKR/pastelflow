@@ -73,7 +73,8 @@ export type Widget = {
 export type WidgetPatch = Partial<Pick<Widget, 'size' | 'color' | 'position' | 'config'>>;
 
 // 홈 위젯이 받는 데이터베이스 묶음
-export type AgendaDb = { id: string; title: string; icon: string; schema: Schema; rows: Row[] };
+// shared: 전체 공용·스페이스의 데이터베이스 (rows 에는 내가 담당자인 항목만 온다)
+export type AgendaDb = { id: string; title: string; icon: string; schema: Schema; shared: boolean; rows: Row[] };
 
 export type PagePatch = Partial<Pick<Page, 'title' | 'icon' | 'cover' | 'content' | 'favorite' | 'position' | 'parentId' | 'schema' | 'private' | 'spaceId' | 'locked' | 'categoryId'>> & {
   props?: Record<string, PropValue | null>;
