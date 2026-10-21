@@ -1,4 +1,5 @@
-import { BlockNoteSchema, createCodeBlockSpec, createInlineContentSpec, defaultBlockSpecs, defaultInlineContentSpecs } from '@blocknote/core';
+import { BlockNoteSchema, createCodeBlockSpec, createInlineContentSpec, createStyleSpec, defaultBlockSpecs, defaultInlineContentSpecs, defaultStyleSpecs } from '@blocknote/core';
+import { FONT_BY_ID, fontStack } from './fonts.js';
 
 // 문서 에디터 스키마. 화면(src/components/Editor.tsx)과 서버(server/realtime.js)가 같이 쓴다.
 // 서버도 같은 스키마로 Yjs ↔ JSON 을 바꿔야 새 요소가 저장 중에 사라지지 않는다.
@@ -101,10 +102,25 @@ export const CODE_LANGUAGES = {
   diff: { name: 'Diff', aliases: ['diff', 'patch'] },
 };
 
+// 글꼴 (값 = server/shared/fonts.js 의 글꼴 id). 글꼴 파일은 화면에서 data-font 를 보고 불러온다
+export const Font = createStyleSpec(
+  { type: 'font', propSchema: 'string' },
+  {
+    render: (id) => {
+      const span = document.createElement('span');
+      span.dataset.font = id;
+      span.style.fontFamily = fontStack(id);
+      return { dom: span, contentDOM: span };
+    },
+    parse: (el) => (el.dataset.font && FONT_BY_ID[el.dataset.font] ? el.dataset.font : undefined),
+  },
+);
+
 export const editorSchema = BlockNoteSchema.create({
   blockSpecs: {
     ...defaultBlockSpecs,
     codeBlock: createCodeBlockSpec({ indentLineWithTab: true, defaultLanguage: 'text', supportedLanguages: CODE_LANGUAGES }),
   },
   inlineContentSpecs: { ...defaultInlineContentSpecs, attachment: Attachment },
+  styleSpecs: { ...defaultStyleSpecs, font: Font },
 });

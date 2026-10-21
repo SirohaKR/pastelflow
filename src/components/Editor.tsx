@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type MouseEvent } from 'react';
-import { getDefaultReactSlashMenuItems, SuggestionMenuController, useCreateBlockNote } from '@blocknote/react';
+import {
+  FormattingToolbar,
+  FormattingToolbarController,
+  getDefaultReactSlashMenuItems,
+  getFormattingToolbarItems,
+  SuggestionMenuController,
+  useCreateBlockNote,
+} from '@blocknote/react';
 import { filterSuggestionItems } from '@blocknote/core';
 import { TextSelection } from '@tiptap/pm/state';
 import { BlockNoteView } from '@blocknote/mantine';
@@ -13,6 +20,8 @@ import { api, type User } from '../api';
 import { CLIENT_ID, CURSOR_COLORS, useMe, wsUrl } from '../session';
 import { editorSchema } from '../../server/shared/editorSchema.js';
 import { guessLanguage, syntaxHighlighter } from '../codeHighlight';
+import { watchFonts } from '../fonts';
+import { FontButton } from './FontButton';
 
 // 클립보드에 글 넣기 (http 로 접속하면 navigator.clipboard 가 없어서 예전 방식으로)
 async function copyText(text: string) {
@@ -179,6 +188,8 @@ function CollabEditor({ conn, dark, me, readOnly }: { conn: Conn; dark: boolean;
   const wrapRef = useRef<HTMLDivElement>(null);
   const [codeHover, setCodeHover] = useState<{ el: HTMLElement; top: number; right: number } | null>(null);
   const [copied, setCopied] = useState(false);
+  // 문서에 쓰인 글꼴 파일 불러오기
+  useEffect(() => (wrapRef.current ? watchFonts(wrapRef.current) : undefined), []);
   const onMouseMove = (e: MouseEvent) => {
     const t = e.target as HTMLElement;
     if (t.closest('.code-copy')) return;
@@ -214,7 +225,14 @@ function CollabEditor({ conn, dark, me, readOnly }: { conn: Conn; dark: boolean;
           {copied ? '✓ 복사됨' : '⧉ 복사'}
         </button>
       )}
-      <BlockNoteView editor={editor} theme={dark ? 'dark' : 'light'} editable={!readOnly} slashMenu={false}>
+      <BlockNoteView editor={editor} theme={dark ? 'dark' : 'light'} editable={!readOnly} slashMenu={false} formattingToolbar={false}>
+        <FormattingToolbarController
+          formattingToolbar={() => (
+            <FormattingToolbar>
+              {getFormattingToolbarItems().flatMap((item) => (item.key === 'colorStyleButton' ? [item, <FontButton key="fontButton" />] : [item]))}
+            </FormattingToolbar>
+          )}
+        />
         <SuggestionMenuController
           triggerCharacter="/"
           getItems={async (query) => filterSuggestionItems([

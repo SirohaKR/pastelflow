@@ -886,3 +886,24 @@ a.icon-btn { display: inline-grid; place-items: center; color: var(--text); text
 .people-search { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; margin-bottom: 4px; background: var(--surface); color: var(--text); outline: none; }
 .people-search:focus { border-color: var(--accent); }
 .people-item-name { flex: 1; }
+
+/* 서식 툴바: 글꼴 고르기 */
+.font-button-icon { font-size: 16px; font-weight: 700; line-height: 1; }
+.font-menu { width: 280px; padding: 8px !important; display: flex; flex-direction: column; gap: 6px; }
+.font-search {
+  font: inherit; font-size: 13px; color: var(--text); background: var(--sidebar);
+  border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; outline: 0;
+}
+.font-search:focus { border-color: var(--accent); }
+.font-list { max-height: 340px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.font-group { display: flex; flex-direction: column; gap: 2px; }
+.font-group-name { font-family: var(--font); font-size: 11px; font-weight: 700; color: var(--muted); padding: 8px 8px 2px; }
+.font-item {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  border: 0; background: transparent; color: var(--text); border-radius: 8px;
+  padding: 6px 8px; font-size: 16px; line-height: 1.35; cursor: pointer;
+}
+.font-item:hover { background: var(--hover); }
+.font-item.on { background: var(--accent-soft); }
+.font-check { margin-left: auto; font-family: var(--font); font-size: 13px; color: var(--accent-ink); }
+.font-empty { font-size: 13px; color: var(--muted); padding: 12px 8px; text-align: center; }

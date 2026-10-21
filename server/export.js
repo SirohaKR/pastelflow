@@ -1,5 +1,7 @@
 // 페이지 내려받기: Markdown(.md) / HTML(.html) / 인쇄용 화면(브라우저에서 PDF로 저장)
 
+import { fontHead } from './shared/fonts.js';
+
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 // 파일 이름에 쓸 수 없는 글자를 뺀다
@@ -50,6 +52,7 @@ function htmlDoc({ title, icon, body, print }) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title || '제목 없음')}</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+${fontHead(new Set([...body.matchAll(/data-font="([\w-]+)"/g)].map((m) => m[1])))}
 <style>${STYLE}</style>
 </head>
 <body>
