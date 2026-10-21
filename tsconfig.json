@@ -17,6 +17,7 @@
       "vite/client"
     ],
     "allowJs": true,
+    "resolveJsonModule": true,
     "checkJs": false
   },
   "include": [

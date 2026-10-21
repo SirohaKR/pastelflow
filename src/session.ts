@@ -4,6 +4,24 @@ import type { TagColor, User } from './api';
 // 이 브라우저 탭을 구분하는 값. 내가 일으킨 변경 알림은 무시할 때 쓴다
 export const CLIENT_ID = Math.random().toString(36).slice(2, 10);
 
+// 빌드할 때 package.json 버전이 들어간다 (vite.config.ts)
+declare const __APP_VERSION__: string;
+export const APP_VERSION = __APP_VERSION__;
+
+// 서버가 새 버전이면 새로고침 (예전 화면으로 문서를 고치면 새 요소가 지워질 수 있어서).
+// 캐시 때문에 새로고침해도 그대로면 계속 돌지 않게 버전마다 한 번만
+export function reloadForVersion(serverVersion: string) {
+  if (!serverVersion || serverVersion === APP_VERSION) return;
+  const key = `pf-reloaded:${serverVersion}`;
+  try {
+    if (sessionStorage.getItem(key)) return;
+    sessionStorage.setItem(key, '1');
+  } catch {
+    /* 그냥 새로고침 */
+  }
+  location.reload();
+}
+
 export const MeContext = createContext<User | null>(null);
 export const useMe = () => useContext(MeContext);
 

@@ -17,7 +17,7 @@ import * as Y from 'yjs';
 import '@blocknote/core/fonts/inter.css';
 import '@blocknote/mantine/style.css';
 import { api, type User } from '../api';
-import { CLIENT_ID, CURSOR_COLORS, useMe, wsUrl } from '../session';
+import { APP_VERSION, CLIENT_ID, CURSOR_COLORS, useMe, wsUrl } from '../session';
 import { editorSchema } from '../../server/shared/editorSchema.js';
 import { guessLanguage, syntaxHighlighter } from '../codeHighlight';
 import { watchFonts } from '../fonts';
@@ -66,7 +66,8 @@ export function Editor({ pageId, dark, readOnly = false }: Props) {
   useEffect(() => {
     const doc = new Y.Doc();
     const provider = new HocuspocusProvider({
-      url: wsUrl(`/collab?client=${CLIENT_ID}`),
+      // 서버와 버전이 다르면 서버가 연결을 받지 않는다 (server/realtime.js)
+      url: wsUrl(`/collab?client=${CLIENT_ID}&v=${encodeURIComponent(APP_VERSION)}`),
       name: pageId,
       document: doc,
       token: 'session',

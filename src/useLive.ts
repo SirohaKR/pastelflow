@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { CLIENT_ID, wsUrl } from './session';
+import { CLIENT_ID, reloadForVersion, wsUrl } from './session';
 
 // 서버 /events 연결: 다른 사람이 바꾼 내용 알림과, 누가 어느 페이지를 보고 있는지
 export function useLive(enabled: boolean, pageId: string | null, onChanged: () => void) {
@@ -27,12 +27,13 @@ export function useLive(enabled: boolean, pageId: string | null, onChanged: () =
         ws.send(JSON.stringify({ type: 'view', pageId: pageRef.current }));
       };
       ws.onmessage = (e) => {
-        let msg: { type?: string; viewers?: Record<string, string[]>; by?: string | null };
+        let msg: { type?: string; viewers?: Record<string, string[]>; by?: string | null; version?: string };
         try {
           msg = JSON.parse(String(e.data));
         } catch {
           return;
         }
+        if (msg.type === 'version' && msg.version) reloadForVersion(msg.version);
         if (msg.type === 'presence' && msg.viewers) setViewers(msg.viewers);
         if (msg.type === 'changed' && msg.by !== CLIENT_ID) changedRef.current();
       };

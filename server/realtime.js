@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { Hocuspocus } from '@hocuspocus/server';
 import { ServerBlockNoteEditor } from '@blocknote/server-util';
 import { WebSocketServer } from 'ws';
@@ -8,6 +9,11 @@ import { editorSchema } from './shared/editorSchema.js';
 //  /collab  : 문서 본문 동시 편집 (Yjs + Hocuspocus). 다른 사람 커서도 이 연결로 오간다
 //  /events  : "페이지가 바뀌었어요" 알림과 누가 어느 페이지를 보고 있는지
 export const FRAGMENT = 'document-store';
+
+// 앱 버전. 화면도 빌드할 때 같은 package.json 버전을 넣는다 (vite.config.ts)
+// 버전이 다른 화면은 문서 스키마가 달라서, 모르는 요소(예: 글꼴)가 든 문단을 통째로 지워 버린다.
+// 그래서 버전이 다르면 동시 편집에 못 붙게 막고, /events 로 새 버전을 알려 새로고침하게 한다
+export const APP_VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
 export function setupRealtime(server, { repo, userFromRequest }) {
   // 화면과 같은 스키마여야 📎 첨부 같은 요소가 저장 중에 사라지지 않는다
@@ -51,6 +57,7 @@ export function setupRealtime(server, { repo, userFromRequest }) {
   function onEventsConnection(ws, user) {
     const client = { ws, user, clientId: null, pageId: null };
     clients.add(client);
+    send(ws, { type: 'version', version: APP_VERSION });
     ws.on('message', (raw) => {
       let msg;
       try {
@@ -130,8 +137,12 @@ export function setupRealtime(server, { repo, userFromRequest }) {
   });
 
   server.on('upgrade', (req, socket, head) => {
-    const { pathname } = new URL(req.url, 'http://localhost');
+    const { pathname, searchParams } = new URL(req.url, 'http://localhost');
     if (pathname !== '/collab' && pathname !== '/events') return socket.destroy();
+    if (pathname === '/collab' && searchParams.get('v') !== APP_VERSION) {
+      socket.write('HTTP/1.1 409 Conflict\r\n\r\n');
+      return socket.destroy();
+    }
     const user = userFromRequest(req);
     if (!user) {
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
