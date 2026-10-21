@@ -5,7 +5,7 @@ import { Popover } from './Popover';
 import { Avatar } from './Account';
 import { SpaceIcon } from './SpaceHome';
 import './spaces.css';
-import { DELETE, EDIT, MANAGE, scopeLevel } from '../roles';
+import { DELETE, EDIT, MANAGE, VIEW, scopeLevel } from '../roles';
 import { inZone, zoneInfo, zoneScope, type ZoneKey } from '../zones';
 
 type Props = {
@@ -88,9 +88,11 @@ export function Sidebar(props: Props) {
   };
 
   // 카테고리 이름 위로 끌어 놓으면 그 카테고리로 옮긴다
+  // 잠긴 카테고리(공지)는 관리자가 아니면 보기만
+  const catLevel = (c: Category) => (c.locked && level < MANAGE ? Math.min(level, VIEW) : level);
   const catDrop = (c: Category) => ({
     onDragOver: (e: DragEvent) => {
-      if (!dragId || level < EDIT) return;
+      if (!dragId || catLevel(c) < EDIT) return;
       e.preventDefault();
       setOverCat(c.id);
     },
@@ -209,12 +211,13 @@ export function Sidebar(props: Props) {
                   <button className="side-fold" onClick={() => toggleFold(`cat:${c.id}`)} title={isFolded ? '펼치기' : '접기'}>
                     <span className={`fold-arrow ${isFolded ? '' : 'open'}`}>▶</span>
                     <span className="side-label-text">{c.name}</span>
+                    {c.locked && <span className="cat-lock" title={level >= MANAGE ? '관리자만 고칠 수 있는 카테고리예요' : '관리자만 고칠 수 있어요. 읽기만 돼요'}>🔒</span>}
                   </button>
                   <span className="side-label-tools">
                     {level >= MANAGE && (
                       <button className="icon-btn" title="카테고리 메뉴" onClick={(e) => setCatMenu({ anchor: e.currentTarget, cat: c })}>⋯</button>
                     )}
-                    {level >= EDIT && (
+                    {catLevel(c) >= EDIT && (
                       <button className="icon-btn" title="이 카테고리에 페이지 추가" onClick={() => onCreate(null, 'page', { ...scope, categoryId: c.id })}>+</button>
                     )}
                   </span>
@@ -274,6 +277,9 @@ export function Sidebar(props: Props) {
         <Popover anchor={catMenu.anchor} onClose={() => setCatMenu(null)}>
           <div className="menu">
             <button onClick={() => { setNaming({ id: catMenu.cat.id, name: catMenu.cat.name }); setCatMenu(null); }}>✏️ 이름 바꾸기</button>
+            <button onClick={() => { const c = catMenu.cat; setCatMenu(null); run(() => api.updateCategory(c.id, { locked: !c.locked })); }}>
+              {catMenu.cat.locked ? '🔓 모두 고칠 수 있게' : '🔒 관리자만 고칠 수 있게'}
+            </button>
             <button disabled={cats[0]?.id === catMenu.cat.id} onClick={() => { shift(catMenu.cat, -1); setCatMenu(null); }}>⬆ 위로</button>
             <button disabled={cats[cats.length - 1]?.id === catMenu.cat.id} onClick={() => { shift(catMenu.cat, 1); setCatMenu(null); }}>⬇ 아래로</button>
             <button
@@ -509,7 +515,7 @@ function TreeNode(props: NodeProps) {
         <Popover anchor={catAnchor} onClose={() => setCatAnchor(null)}>
           <div className="menu">
             <div className="pop-head">어느 카테고리에 넣을까요?</div>
-            {[{ id: null as string | null, name: '카테고리 없음' }, ...zoneCats].map((c) => (
+            {[{ id: null as string | null, name: '카테고리 없음', locked: false }, ...zoneCats.filter((c) => !c.locked || scopeLevel(props.me, spaces, pageScope) >= MANAGE)].map((c) => (
               <button
                 key={c.id ?? 'none'}
                 className={(page.categoryId ?? null) === c.id ? 'on' : ''}

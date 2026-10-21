@@ -105,7 +105,7 @@ export type Space = {
 // 최상위 페이지가 놓이는 자리: 전체 공용 / 스페이스 / 내 페이지
 export type Scope = { private?: boolean; spaceId?: string | null; categoryId?: string | null };
 // 구역마다 최상위 페이지를 묶는 카테고리
-export type Category = { id: string; name: string; position: number; private: boolean; spaceId: string | null };
+export type Category = { id: string; name: string; position: number; private: boolean; spaceId: string | null; locked: boolean };
 
 export type AuthStatus = { setup: boolean; user: User | null };
 export type Invite = { code: string; createdBy: string; createdAt: number; expiresAt: number; usedBy: string | null; usedAt: number | null; role: User['role'] };
@@ -164,7 +164,7 @@ export const api = {
   deleteSpace: (id: string) => request('DELETE', `/api/spaces/${id}`),
   categories: () => request<Category[]>('GET', '/api/categories'),
   createCategory: (name: string, scope: Scope) => request<Category>('POST', '/api/categories', { name, private: !!scope.private, spaceId: scope.spaceId ?? null }),
-  updateCategory: (id: string, patch: Partial<Pick<Category, 'name' | 'position'>>) => request<Category>('PATCH', `/api/categories/${id}`, patch),
+  updateCategory: (id: string, patch: Partial<Pick<Category, 'name' | 'position' | 'locked'>>) => request<Category>('PATCH', `/api/categories/${id}`, patch),
   deleteCategory: (id: string) => request('DELETE', `/api/categories/${id}`),
   updatePage: (id: string, patch: PagePatch, keepalive = false) =>
     request<Page>('PATCH', `/api/pages/${id}`, patch, keepalive),

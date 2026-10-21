@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { welcomeContent } from './seed.js';
+import { welcomeContent, zoneSeed } from './seed.js';
 
 export function openDb(dataDir) {
   const db = new DatabaseSync(path.join(dataDir, 'pastelflow.db'));
@@ -80,6 +80,9 @@ export function openDb(dataDir) {
   // 0.8.0: 스페이스 아이콘 사진
   const spaceCols = new Set(db.prepare('PRAGMA table_info(spaces)').all().map((c) => c.name));
   if (!spaceCols.has('image')) db.exec("ALTER TABLE spaces ADD COLUMN image TEXT NOT NULL DEFAULT ''");
+  // 0.11.0: 관리자만 고칠 수 있는 카테고리 (공지)
+  const catCols = new Set(db.prepare('PRAGMA table_info(categories)').all().map((c) => c.name));
+  if (!catCols.has('locked')) db.exec('ALTER TABLE categories ADD COLUMN locked INTEGER NOT NULL DEFAULT 0');
   return db;
 }
 
@@ -296,12 +299,15 @@ export function createRepo(db) {
     if (space != null) return ROLE_LEVEL[stmt.isMember.get(space, uid)?.role] ?? 0;
     return ROLE_LEVEL[site] ?? 0;
   }
-  // 자기나 상위 페이지 중 하나라도 잠겼는지
+  // 관리자만 고칠 수 있는 카테고리인지
+  const catLocked = (catId) => !!catId && !!stmt.getCat.get(catId)?.locked;
+  // 자기나 상위 페이지 중 하나라도 잠겼는지 (맨 위 페이지가 잠긴 카테고리에 있어도 잠김)
   function lockedChain(row, get = (id) => stmt.get.get(id)) {
     let cur = row;
     for (let i = 0; cur && i < 100; i++) {
       if (cur.locked) return true;
-      cur = cur.parent_id ? get(cur.parent_id) : null;
+      if (!cur.parent_id) return cur.kind !== 'row' && catLocked(cur.category_id);
+      cur = get(cur.parent_id);
     }
     return false;
   }
@@ -321,7 +327,11 @@ export function createRepo(db) {
     const c = stmt.getCat.get(catId);
     return c && (c.private_owner ?? null) === (owner ?? null) && (c.space_id ?? null) === (space ?? null) ? c.id : null;
   }
-  const toCategory = (c) => ({ id: c.id, name: c.name, position: c.position, private: c.private_owner != null, spaceId: c.space_id ?? null });
+  const toCategory = (c) => ({ id: c.id, name: c.name, position: c.position, private: c.private_owner != null, spaceId: c.space_id ?? null, locked: !!c.locked });
+  // 잠긴 카테고리에 페이지를 넣는 건 그 자리 관리자만
+  function needCatPut(catId, scope, uid) {
+    if (uid != null && catLocked(catId) && scopeLevel(scope.owner, scope.space, uid) < MANAGE) throw httpError(403, '관리자만 고칠 수 있는 카테고리예요.');
+  }
   // 카테고리는 그 자리 관리자(개인 페이지는 주인)가 만들고 고친다
   function needCategory(id, uid) {
     const c = stmt.getCat.get(id);
@@ -386,8 +396,9 @@ export function createRepo(db) {
         if (parent) need(parent, uid, EDIT);
         else needScope(scope, uid, EDIT);
       }
-      stmt.insert.run(id, parentId, kind, str(title, 300), icon, cover, JSON.stringify(content), rowProps, schema, pos, now, now, scope.owner, scope.space);
       const cat = parent ? null : categoryIn(categoryId, scope.owner, scope.space);
+      needCatPut(cat, scope, uid);
+      stmt.insert.run(id, parentId, kind, str(title, 300), icon, cover, JSON.stringify(content), rowProps, schema, pos, now, now, scope.owner, scope.space);
       if (cat) stmt.setCat.run(cat, id);
       return viewFor(id, uid);
     },
@@ -477,7 +488,10 @@ export function createRepo(db) {
       const wantCat = 'categoryId' in patch ? patch.categoryId || null : cur.category_id;
       const cat = topLevel ? categoryIn(wantCat, owner, space) : null;
       if (wantCat && 'categoryId' in patch && topLevel && !cat) throw httpError(400, '그 카테고리에는 넣을 수 없어요.');
-      if (cat !== (cur.category_id ?? null)) set('category_id', cat);
+      if (cat !== (cur.category_id ?? null)) {
+        needCatPut(cat, { owner, space }, uid);
+        set('category_id', cat);
+      }
       if (moved) {
         // 하위 페이지·데이터베이스 항목도 같이 옮긴다
         for (const pid of subtree(id)) stmt.setScope.run(owner, space, pid);
@@ -512,7 +526,9 @@ export function createRepo(db) {
       try {
         const title = `${src.title.trim() || '제목 없음'} (사본)`.slice(0, 300);
         const newId = copy(src, src.parent_id, position, title);
-        if (!src.parent_id && src.category_id) stmt.setCat.run(src.category_id, newId);
+        // 잠긴 카테고리(공지)의 복사본은 관리자가 아니면 카테고리 밖에 둔다
+        const canPut = !catLocked(src.category_id) || scopeLevel(src.private_owner, src.space_id, uid) >= MANAGE;
+        if (!src.parent_id && src.category_id && canPut) stmt.setCat.run(src.category_id, newId);
         db.exec('COMMIT');
         return viewFor(newId, uid);
       } catch (err) {
@@ -583,6 +599,7 @@ export function createRepo(db) {
         db.prepare('UPDATE categories SET name = ? WHERE id = ?').run(n, id);
       }
       if (typeof patch.position === 'number' && Number.isFinite(patch.position)) db.prepare('UPDATE categories SET position = ? WHERE id = ?').run(patch.position, id);
+      if (typeof patch.locked === 'boolean') db.prepare('UPDATE categories SET locked = ? WHERE id = ?').run(patch.locked ? 1 : 0, id);
       return toCategory(stmt.getCat.get(id));
     },
     // 지우면 안의 페이지는 카테고리 없이 남는다
@@ -590,6 +607,39 @@ export function createRepo(db) {
       needCategory(id, uid);
       db.prepare('UPDATE pages SET category_id = NULL WHERE category_id = ?').run(id);
       db.prepare('DELETE FROM categories WHERE id = ?').run(id);
+    },
+
+    // 구역(전체 공용 / 스페이스)의 기본 틀: '공지'(관리자만 편집)와 '일반' 카테고리, 각각 안내 페이지 하나
+    // generalPageId 를 주면 '일반' 에 새 페이지 대신 그 페이지를 넣는다
+    seedZone({ spaceId = null, generalPageId = null } = {}) {
+      const seed = zoneSeed(spaceId ? 'space' : 'shared');
+      const top = db.prepare('SELECT MIN(position) AS m FROM categories WHERE private_owner IS NULL AND space_id IS ?').get(spaceId).m;
+      const base = top == null ? 0 : top - 3;
+      const addCat = (name, locked, position) => {
+        const id = randomUUID();
+        db.prepare('INSERT INTO categories (id, space_id, private_owner, name, position, created_at, locked) VALUES (?, ?, NULL, ?, ?, ?, ?)')
+          .run(id, spaceId, name, position, Date.now(), locked ? 1 : 0);
+        return id;
+      };
+      // 권한 확인 없이 서버가 직접 넣는다 (만든 사람은 이미 확인함)
+      const addPage = (p, catId) => {
+        const id = randomUUID();
+        const now = Date.now();
+        stmt.insert.run(id, null, 'page', p.title, p.icon, '', JSON.stringify(p.content), '{}', null, stmt.maxPos.get(null).m + 1, now, now, null, spaceId);
+        stmt.setCat.run(catId, id);
+      };
+      db.exec('BEGIN');
+      try {
+        const notice = addCat('공지', true, base + 1);
+        const general = addCat('일반', false, base + 2);
+        addPage(seed.notice, notice);
+        if (generalPageId) stmt.setCat.run(general, generalPageId);
+        else addPage(seed.general, general);
+        db.exec('COMMIT');
+      } catch (err) {
+        db.exec('ROLLBACK');
+        throw err;
+      }
     },
 
     // 화면 설정은 사람마다 따로 (예전 공용 설정은 첫 관리자에게 넘긴다)
@@ -623,8 +673,14 @@ export function createRepo(db) {
     },
   };
 
+  let welcomeId = null;
   if (stmt.count.get().n === 0) {
-    repo.create({ title: '파스텔플로우에 오신 걸 환영해요', icon: '🌷', cover: '#e5dcfb', content: welcomeContent });
+    welcomeId = repo.create({ title: '파스텔플로우에 오신 걸 환영해요', icon: '🌷', cover: '#e5dcfb', content: welcomeContent }).id;
+  }
+  // 0.11.0: 전체 공용 기본 틀은 한 번만 만든다 (지운 뒤에 다시 생기지 않게)
+  if (!stmt.getSetting.get('seeded:shared')) {
+    repo.seedZone({ generalPageId: welcomeId });
+    stmt.putSetting.run('seeded:shared', String(Date.now()));
   }
 
   return repo;

@@ -35,3 +35,20 @@ export function saveZone(z: ZoneKey) {
     /* 무시 */
   }
 }
+
+// 구역마다 마지막으로 본 페이지 ('' 이면 스페이스 홈)
+export function loadLast(z: ZoneKey): string | null {
+  try {
+    return localStorage.getItem('pf-last:' + z);
+  } catch {
+    return null;
+  }
+}
+
+export function saveLast(z: ZoneKey, id: string) {
+  try {
+    localStorage.setItem('pf-last:' + z, id);
+  } catch {
+    /* 무시 */
+  }
+}

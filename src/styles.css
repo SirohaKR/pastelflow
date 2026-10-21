@@ -803,3 +803,54 @@ td.col-file { min-width: 170px; max-width: 320px; }
   border-radius: 10px; background: var(--text); color: var(--bg); font-size: 13px;
 }
 .slash-icon { font-size: 16px; }
+
+/* ── 잠긴 카테고리 ── */
+.cat-lock { font-size: 11px; margin-left: 4px; opacity: 0.75; }
+
+/* ── 내려받기 메뉴 ── */
+.menu a.menu-link {
+  display: flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none;
+  border-radius: 8px; padding: 7px 10px;
+}
+.menu a.menu-link:hover { background: var(--hover); }
+.menu-sub { color: var(--muted); font-size: 12px; margin-left: auto; }
+a.icon-btn { display: inline-grid; place-items: center; color: var(--text); text-decoration: none; }
+
+/* ── 첨부파일 미리보기 ── */
+.pv-overlay { padding: 4vh 16px; align-items: center; z-index: 80; }
+.pv {
+  width: min(1000px, 100%); height: min(88vh, 100%);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.pv-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 18px; border-bottom: 1px solid var(--border); }
+.pv-name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.pv-count { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.pv-tools { margin-left: auto; display: flex; gap: 2px; flex-shrink: 0; }
+.pv-body { flex: 1; min-height: 0; overflow: auto; display: flex; background: var(--bg); }
+.pv-img { margin: auto; max-width: 100%; max-height: 100%; object-fit: contain; padding: 16px; box-sizing: border-box; }
+.pv-frame { flex: 1; border: 0; width: 100%; background: #fff; }
+.pv-media { margin: auto; max-width: 100%; max-height: 100%; }
+.pv-audio { margin: auto; width: min(480px, 90%); }
+.pv-empty { margin: auto; display: grid; justify-items: center; gap: 12px; color: var(--muted); padding: 24px; text-align: center; }
+.pv-big { font-size: 48px; }
+.pv-btn { background: var(--accent-soft); color: var(--accent-ink); border-radius: 10px; padding: 8px 16px; text-decoration: none; font-weight: 600; }
+.pv-text-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pv-switch { display: flex; gap: 4px; padding: 10px 16px 0; }
+.pv-switch button { border: 0; background: transparent; color: var(--muted); border-radius: 8px; padding: 4px 12px; font-size: 13px; }
+.pv-switch button.on { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+.pv-text { margin: 0; padding: 16px 20px; white-space: pre-wrap; word-break: break-word; font: 13px/1.6 Consolas, 'D2Coding', monospace; color: var(--text); }
+.pv-md { padding: 12px 28px 28px; line-height: 1.75; color: var(--text); max-width: 820px; }
+.pv-md img { max-width: 100%; border-radius: 8px; }
+.pv-md li { margin: 4px 0; }
+.pv-md li > p, .pv-md td > p, .pv-md th > p { margin: 0; }
+.pv-md li:has(> input[type=checkbox]) { list-style: none; display: flex; gap: 8px; align-items: baseline; margin-left: -1.3em; }
+.pv-md table { border-collapse: collapse; }
+.pv-md th, .pv-md td { border: 1px solid var(--border); padding: 6px 10px; }
+.pv-md pre { background: var(--sidebar); padding: 12px; border-radius: 8px; overflow-x: auto; }
+.pv-md blockquote { border-left: 3px solid var(--accent); margin: 0; padding-left: 14px; color: var(--muted); }
+.pv-note { color: var(--muted); font-size: 12px; padding: 0 20px 16px; }
+@media (max-width: 760px) {
+  .pv-overlay { padding: 0; }
+  .pv { height: 100%; border-radius: 0; }
+}

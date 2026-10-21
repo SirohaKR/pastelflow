@@ -9,10 +9,12 @@ import { AuthScreen, Avatar, MembersDialog, ProfileDialog } from './components/A
 import { MeContext } from './session';
 import { SpaceDialog } from './components/SpaceDialog';
 import { SpaceHome, SpaceIcon, type SpaceDialogMode } from './components/SpaceHome';
-import { loadZone, saveZone, validZone, zoneOf, type ZoneKey } from './zones';
+import { inZone, loadLast, loadZone, saveLast, saveZone, validZone, zoneOf, type ZoneKey } from './zones';
 import { useLive } from './useLive';
 import { Home } from './components/home/Home';
 import { WidgetPage } from './components/home/WidgetPage';
+import { ExportMenu } from './components/ExportMenu';
+import { PreviewHost } from './components/Preview';
 
 const isNarrow = () => window.matchMedia('(max-width: 760px)').matches;
 
@@ -193,6 +195,24 @@ export default function App() {
   useEffect(() => {
     if (currentZone) setZone(currentZone);
   }, [currentId, currentZone, setZone]);
+
+  // 구역마다 마지막으로 본 페이지를 기억한다 (스페이스 홈은 '')
+  useEffect(() => {
+    if (currentId && currentZone) saveLast(currentZone, currentId);
+  }, [currentId, currentZone]);
+  useEffect(() => {
+    if (spaceHomeId) saveLast(spaceHomeId, '');
+  }, [spaceHomeId]);
+
+  // 사이드바에서 구역을 바꾸면 그 구역에서 보던 페이지로 (없으면 스페이스 홈이나 홈)
+  const switchZone = useCallback((z: ZoneKey) => {
+    setZone(z);
+    const last = loadLast(z);
+    const meta = last ? pages?.find((p) => p.id === last && p.deletedAt == null) : null;
+    if (meta && inZone(meta, z)) open(meta.id);
+    else if (z !== 'shared' && z !== 'private') openSpace(z);
+    else open(null);
+  }, [setZone, pages, open, openSpace]);
 
   useEffect(() => {
     if (!currentId || !authed) {
@@ -395,7 +415,7 @@ export default function App() {
         pages={pages}
         categories={categories}
         zone={validZone(zone, spaces)}
-        onZone={setZone}
+        onZone={switchZone}
         currentId={spaceHomeId ? '' : currentId}
         expanded={expanded}
         onToggle={toggle}
@@ -468,6 +488,7 @@ export default function App() {
               {pages.find((p) => p.id === page.id)?.favorite ? '⭐' : '☆'}
             </button>
           )}
+          {page && page.kind === 'page' && <ExportMenu pageId={page.id} />}
           <button className="icon-btn" title="테마 설정" onClick={() => setDialog('settings')}>🎨</button>
         </div>
 
@@ -538,6 +559,7 @@ export default function App() {
           onError={showError}
         />
       )}
+      <PreviewHost />
       {toast && <div className="toast">{toast}</div>}
     </div>
     </MeContext.Provider>

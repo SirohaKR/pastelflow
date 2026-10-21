@@ -49,10 +49,12 @@ export const Attachment = createInlineContentSpec(
       } else {
         a.textContent = `${fileIcon(name)} ${name || '파일'}`;
       }
-      // 에디터 안에서는 링크를 눌러도 이동하지 않으므로 직접 새 탭으로 연다
+      // 누르면 앱 안 미리보기 창으로 (Ctrl·⌘ 누르고 누르면 새 탭)
       a.addEventListener('click', (e) => {
         e.preventDefault();
-        if (url) window.open(url, '_blank', 'noopener');
+        if (!url) return;
+        if (e.ctrlKey || e.metaKey) window.open(url, '_blank', 'noopener');
+        else window.dispatchEvent(new CustomEvent('pf:preview', { detail: { files: [{ url, name, mime }], index: 0 } }));
       });
       return { dom: a };
     },

@@ -9,6 +9,7 @@ import { createWidgetRepo } from './widgets.js';
 import { createUserRepo, publicUser } from './users.js';
 import { setupRealtime } from './realtime.js';
 import { createSpaceRepo } from './spaces.js';
+import { exportPage, fileName } from './export.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.PORT || 5210);
@@ -131,9 +132,10 @@ const requireAdmin = (req, _res, next) => next(req.user.role === 'admin' ? undef
 app.use('/uploads', express.static(UPLOAD_DIR, {
   maxAge: '30d',
   immutable: true,
-  setHeaders: (res) => {
+  setHeaders: (res, filePath) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Content-Security-Policy', 'sandbox');
+    // PDF 는 sandbox 면 브라우저의 PDF 보기가 막혀서 빼 둔다 (PDF 보기는 브라우저가 따로 격리함)
+    if (!/\.pdf$/i.test(filePath)) res.setHeader('Content-Security-Policy', 'sandbox');
   },
 }));
 
@@ -163,7 +165,12 @@ app.delete('/api/admin/invites/:code', requireAdmin, (req, res) => {
 
 // ── 스페이스 ──
 app.get('/api/spaces', (req, res) => res.json(spaces.listMine(req.user.id)));
-app.post('/api/spaces', (req, res) => res.status(201).json(spaces.create(req.body || {}, req.user)));
+app.post('/api/spaces', (req, res) => {
+  const space = spaces.create(req.body || {}, req.user);
+  // 새 스페이스에는 '공지'·'일반' 카테고리와 안내 페이지를 만들어 둔다
+  repo.seedZone({ spaceId: space.id });
+  res.status(201).json(space);
+});
 app.patch('/api/spaces/:id', (req, res) => res.json(spaces.update(req.params.id, req.body || {}, req.user)));
 app.put('/api/spaces/:id/members', (req, res) => res.json(spaces.setMembers(req.params.id, req.body?.members, req.user)));
 app.post('/api/spaces/:id/leave', (req, res) => {
@@ -229,6 +236,18 @@ app.patch('/api/pages/:id', (req, res) => {
   const keys = Object.keys(body);
   res.locals.quiet = keys.length > 0 && keys.every((k) => k === 'favorite');
   res.json(repo.update(req.params.id, body, req.user.id));
+});
+
+// 내려받기: ?format=md | html | print(인쇄용 화면 → 브라우저에서 PDF로 저장)
+app.get('/api/pages/:id/export', async (req, res) => {
+  const page = repo.get(req.params.id, req.user.id);
+  if (!page || page.deletedAt != null) throw httpError(404, '페이지를 찾을 수 없습니다.');
+  if (page.kind !== 'page') throw httpError(400, '문서 페이지만 내려받을 수 있어요.');
+  const format = ['md', 'html', 'print'].includes(req.query.format) ? req.query.format : 'md';
+  const out = await exportPage(realtime.blocknote, page, realtime.latestBlocks(page.id), format, `${req.protocol}://${req.get('host')}`);
+  res.type(out.type);
+  if (format !== 'print') res.attachment(`${fileName(page.title)}.${out.ext}`);
+  res.send(out.body);
 });
 
 app.post('/api/pages/:id/duplicate', (req, res) => res.status(201).json(repo.duplicate(req.params.id, req.user.id)));

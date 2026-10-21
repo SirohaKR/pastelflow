@@ -153,5 +153,19 @@ export function setupRealtime(server, { repo, userFromRequest }) {
   process.on('SIGTERM', () => { flush(); setTimeout(() => process.exit(0), 500); });
   process.on('SIGINT', () => { flush(); setTimeout(() => process.exit(0), 500); });
 
-  return { broadcastChange };
+  // 내려받기용: 지금 열려 있는 문서면 메모리의 최신 내용을, 아니면 저장된 본문을
+  function latestBlocks(id) {
+    const doc = hocuspocus.documents.get(id);
+    if (doc) {
+      try {
+        return blocknote.yXmlFragmentToBlocks(doc.getXmlFragment(FRAGMENT));
+      } catch {
+        /* 저장된 본문으로 */
+      }
+    }
+    const page = repo.getRaw(id);
+    return Array.isArray(page?.content) ? page.content : [];
+  }
+
+  return { broadcastChange, latestBlocks, blocknote };
 }

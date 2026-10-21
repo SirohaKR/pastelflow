@@ -1,5 +1,6 @@
 import { useRef, useState, type DragEvent } from 'react';
 import { api, type FileItem, type PropValue } from '../../api';
+import { openPreview } from '../Preview';
 
 export const isImage = (f: FileItem) => (f.mime ? f.mime.startsWith('image/') : /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i.test(f.url));
 export const asFiles = (v: PropValue | undefined): FileItem[] => (Array.isArray(v) ? v : []);
@@ -95,9 +96,19 @@ export function FileCell({ value, onChange, large = false, readOnly = false }: P
 
   return (
     <div className={`file-cell ${large ? 'large' : ''} ${over ? 'drop-over' : ''}`} {...dropProps}>
-      {files.map((f) => (
+      {files.map((f, i) => (
         <span key={f.url} className={`file-item ${isImage(f) ? 'img' : ''}`}>
-          <a href={f.url} target="_blank" rel="noopener noreferrer" title={`${f.name}${f.size ? ` · ${sizeLabel(f.size)}` : ''}`}>
+          <a
+            href={f.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => {
+              // 누르면 미리보기 창 (Ctrl·⌘ 누르고 누르면 새 탭)
+              if (e.ctrlKey || e.metaKey) return;
+              e.preventDefault();
+              e.stopPropagation();
+              openPreview(files, i);
+            }} title={`${f.name}${f.size ? ` · ${sizeLabel(f.size)}` : ''}`}>
             {isImage(f)
               ? <img src={f.url} alt={f.name} loading="lazy" />
               : <span className="file-chip">{fileIcon(f)} {f.name}{large && f.size ? <small> {sizeLabel(f.size)}</small> : null}</span>}
