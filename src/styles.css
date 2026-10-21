@@ -456,6 +456,7 @@ button { cursor: pointer; }
 .db-table .col-date { min-width: 150px; width: 160px; }
 .db-table .col-number { min-width: 110px; width: 130px; }
 .db-table .col-checkbox { min-width: 90px; width: 100px; }
+.db-table .col-person { min-width: 220px; }
 .db-table .col-add { width: 44px; min-width: 44px; }
 .th-btn {
   width: 100%; height: 38px; display: flex; align-items: center; gap: 6px;
@@ -873,3 +874,15 @@ a.icon-btn { display: inline-grid; place-items: center; color: var(--text); text
   .pv-overlay { padding: 0; }
   .pv { height: 100%; border-radius: 0; }
 }
+
+/* ── 담당자(사람) 속성 ── */
+.people { display: inline-flex; align-items: center; gap: 4px 10px; flex-wrap: wrap; }
+.person { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; white-space: nowrap; color: var(--text); }
+.person .avatar { flex-shrink: 0; }
+.cell-people { width: 100%; text-align: left; overflow: hidden; }
+.cell-people .people { flex-wrap: nowrap; }
+.cell-people:disabled { cursor: default; color: inherit; }
+.people-menu { min-width: 220px; max-height: 320px; overflow-y: auto; }
+.people-search { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; margin-bottom: 4px; background: var(--surface); color: var(--text); outline: none; }
+.people-search:focus { border-color: var(--accent); }
+.people-item-name { flex: 1; }

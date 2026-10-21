@@ -7,6 +7,10 @@ export const CLIENT_ID = Math.random().toString(36).slice(2, 10);
 export const MeContext = createContext<User | null>(null);
 export const useMe = () => useContext(MeContext);
 
+// 모든 사용자 (담당자 칸에서 이름·사진을 보여 줄 때)
+export const UsersContext = createContext<User[]>([]);
+export const useUsers = () => useContext(UsersContext);
+
 // 다른 사람 커서·이름표 색 (밝은 배경에서도 잘 보이는 진한 쪽)
 export const CURSOR_COLORS: Record<TagColor, string> = {
   p1: '#6e58c9',

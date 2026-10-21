@@ -6,7 +6,7 @@ import { Sidebar } from './components/Sidebar';
 import { PageView, type SaveState } from './components/PageView';
 import { SearchDialog, SettingsDialog, TrashDialog } from './components/Dialogs';
 import { AuthScreen, Avatar, MembersDialog, ProfileDialog } from './components/Account';
-import { MeContext } from './session';
+import { MeContext, UsersContext } from './session';
 import { SpaceDialog } from './components/SpaceDialog';
 import { SpaceHome, SpaceIcon, type SpaceDialogMode } from './components/SpaceHome';
 import { inZone, loadLast, loadZone, saveLast, saveZone, validZone, zoneOf, type ZoneKey } from './zones';
@@ -410,6 +410,7 @@ export default function App() {
 
   return (
     <MeContext.Provider value={me}>
+    <UsersContext.Provider value={users}>
     <div className={`app ${sidebarOpen ? '' : 'sidebar-closed'}`}>
       <Sidebar
         pages={pages}
@@ -562,6 +563,7 @@ export default function App() {
       <PreviewHost />
       {toast && <div className="toast">{toast}</div>}
     </div>
+    </UsersContext.Provider>
     </MeContext.Provider>
   );
 }

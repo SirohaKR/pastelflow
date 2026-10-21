@@ -3,6 +3,7 @@ import type { Property, PropType, PropValue, SelectOption, TagColor } from '../.
 import { findOption, formatDate, formatNumber, newId, nextColor, PROP_TYPES, TAG_COLORS, typeIcon } from '../../database';
 import { Popover } from '../Popover';
 import { asFiles, FileCell, FilePreview } from './FileCell';
+import { asPeople, PeoplePreview, PersonCell } from './PersonCell';
 
 export const Tag = ({ option, onRemove }: { option: SelectOption; onRemove?: () => void }) => (
   <span className={`tag tag-${option.color}`}>
@@ -16,6 +17,7 @@ export const Tag = ({ option, onRemove }: { option: SelectOption; onRemove?: () 
 // 표 칸, 칸반 카드, 행 페이지에서 쓰는 속성 값 미리보기 (읽기 전용)
 export function PropPreview({ prop, value }: { prop: Property; value: PropValue | undefined }) {
   if (prop.type === 'file') return <FilePreview files={asFiles(value)} />;
+  if (prop.type === 'person') return <PeoplePreview ids={asPeople(value)} />;
   if (Array.isArray(value)) return null;
   if (prop.type === 'select') {
     const opt = findOption(prop, value);
@@ -45,6 +47,7 @@ export function PropEditor({ prop, value, onChange, onOptionsChange, large = fal
   useEffect(() => setDraft(text), [text]);
 
   if (prop.type === 'file') return <FileCell value={value} onChange={onChange} large={large} readOnly={readOnly} />;
+  if (prop.type === 'person') return <PersonCell value={value} onChange={onChange} readOnly={readOnly} />;
 
   if (prop.type === 'checkbox') {
     return (

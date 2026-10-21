@@ -3,7 +3,7 @@ import { api, type FileItem, type PropValue } from '../../api';
 import { openPreview } from '../Preview';
 
 export const isImage = (f: FileItem) => (f.mime ? f.mime.startsWith('image/') : /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i.test(f.url));
-export const asFiles = (v: PropValue | undefined): FileItem[] => (Array.isArray(v) ? v : []);
+export const asFiles = (v: PropValue | undefined): FileItem[] => (Array.isArray(v) ? v.filter((f): f is FileItem => typeof f === 'object' && !!f) : []);
 
 function sizeLabel(n?: number) {
   if (!n) return '';
